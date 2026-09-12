@@ -332,3 +332,7 @@ def run_q1() -> dict:
         out,
     )
     return {"cost": cost, "baseline": baseline, "sol": sol, "checks": checks}
+
+
+if __name__ == "__main__":
+    run_q1()

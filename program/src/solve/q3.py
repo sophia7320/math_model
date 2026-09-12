@@ -5,8 +5,19 @@
 - 6/12/18 调整：同组合口径的最新预报重优化未执行时段（6:00 决策 [6,12)，
   12:00 决策 [12,18)，18:00 决策 [18,24)）
 - 6:00/12:00 调整叠加场景对冲（残差块仅取自目标日之前，10 情景）
-- 执行：逐槽因果（q2.exec_segment_causal，段末储能跟踪规划轨迹），缺口按 5 倍交易时刻电价紧急购电
+- 执行：逐槽因果（core.causal.exec_segment_causal，段末储能跟踪规划轨迹），
+  缺口按 5 倍交易时刻电价紧急购电
 - 结算：费用 = Σ[p·x_adj + 0.5·p·|x_plan − x_adj|] + 5·Σ p·e
+
+# ===========================================================================
+# 三层费用口径（结算规则）
+#     计划层： C_plan = Σ_t p_t · x_plan,t
+#     调整层： C_adj  = Σ_t [ p_t·x_adj,t + 0.5·p_t·|x_plan,t − x_adj,t| ]
+#     紧急层： C_em   = 5 · Σ_t p_t · e_t
+#     总费用： C      = C_adj + C_em
+#     （调整层系数 0.5 即"调低 50% 违约金"的线性化；调高部分按 1.5p 体现在
+#       1.5p·adj − p·y 中，y = min(x_plan, adj)）
+# ===========================================================================
 
 输出：
 - results/result3.xlsx（计划购电量 / 调整购电量 / 充放电量 / 紧急购电量）
@@ -20,13 +31,13 @@ from __future__ import annotations
 import time
 
 import numpy as np
-import openpyxl
 import pandas as pd
 
 import program as pm
 from solve import q2
 from solve import q3_proto as qp
-from solve.common import DATA_C, RESULTS_DIR, ROOT, T
+from solve.common import ROOT, T
+from solve.io.excel import verify_result3, write_result3
 
 LAM = 0.7           # 0:00 组合权重（官方占比）
 ADJ_LAM = 0.7       # 调整层组合权重
@@ -52,12 +63,16 @@ def record(section: str, data, note: str = "") -> None:
 
 
 def _day_result(data, D, **kw):
+    """主方案单日：组合预测 λ=0.7 + 调整层 λ=0.7 + 无前视对冲（10 情景）。"""
     r = qp.simulate_day_rt_hedge(data, D, LAM, adj_lam=ADJ_LAM, n_scen=N_SCEN, seed=SEED, **kw)
     return r
 
 
 def run_main(data):
-    """主方案全年模拟，返回明细。"""
+    """主方案全年模拟，返回明细矩阵与逐日表。
+
+    输出矩阵形状 (N_Q3, T)：xp 计划购电、xa 调整购电、c/d 充放、E 执行储电量、e 紧急。
+    """
     days = list(range(DAY_START, DAY_START + N_Q3))
     out = {k: np.zeros((N_Q3, T)) for k in ("xp", "xa", "c", "d", "E", "e")}
     rows = []
@@ -91,99 +106,8 @@ def run_baseline(data, tag, **kw):
     return {"total": tot, "plan": plan, "adj": adj, "emerg": em, "e": e, "xa": xa}
 
 
-def write_result3(dates, price, out):
-    """按附件 5 模板生成 results/result3.xlsx。"""
-    wb = openpyxl.load_workbook(DATA_C / "附件5" / "result3.xlsx")
-    i0 = DAY_START
-
-    ws = wb["计划购电量"]
-    for i in range(N_Q3):
-        row = 2 + i
-        for t in range(T):
-            ws.cell(row=row, column=2 + t, value=float(out["xp"][i, t]))
-        ws.cell(row=row, column=146, value=float(out["xp"][i].sum()))
-        ws.cell(row=row, column=147, value=float(price @ out["xp"][i]))
-
-    ws = wb["调整购电量"]
-    for i in range(N_Q3):
-        row = 2 + i
-        xa, xp = out["xa"][i], out["xp"][i]
-        for t in range(T):
-            ws.cell(row=row, column=2 + t, value=float(xa[t]))
-        ws.cell(row=row, column=146, value=float(xa.sum()))
-        settle = float((price * xa + 0.5 * price * np.abs(xa - xp)).sum())
-        ws.cell(row=row, column=147, value=settle)
-
-    ws = wb["充放电量"]
-    while ws.max_row > 1:
-        ws.delete_rows(2)
-    row = 2
-    for i in range(N_Q3):
-        for b in range(6):
-            rr = row + b
-            if b == 0:
-                ws.cell(row=rr, column=1, value=pd.Timestamp(dates[i0 + i]).to_pydatetime())
-            ws.cell(row=rr, column=2, value=f"{4 * b}:00-{4 * (b + 1)}:00")
-            ws.cell(row=rr, column=3, value=float(out["c"][i, 24 * b:24 * (b + 1)].sum()))
-            ws.cell(row=rr, column=4, value=float(out["d"][i, 24 * b:24 * (b + 1)].sum()))
-            if b == 0:
-                ws.cell(row=rr, column=5, value="00:00")
-                ws.cell(row=rr, column=6, value=6000.0)
-            if b == 1:
-                ws.cell(row=rr, column=5, value="24:00")
-                ws.cell(row=rr, column=6, value=float(out["E"][i, -1]))
-        row += 6
-
-    ws = wb["紧急购电量"]
-    while ws.max_row > 1:
-        ws.delete_rows(2)
-    row = 2
-    for i in range(N_Q3):
-        for j, (a, b, kwh) in enumerate(q2._events(out["e"][i])):
-            if j == 0:
-                ws.cell(row=row, column=1, value=pd.Timestamp(dates[i0 + i]).to_pydatetime())
-            ws.cell(row=row, column=2, value=f"{q2._fmt_time(a * 10)}-{q2._fmt_time((b + 1) * 10)}")
-            ws.cell(row=row, column=3, value=round(kwh, 4))
-            row += 1
-
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    p = RESULTS_DIR / "result3.xlsx"
-    wb.save(p)
-    wb.close()
-    return p
-
-
-def verify_result3(path, dates, price, out):
-    """回读校验：行数、端点、勾稽、紧急事件。"""
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    chk = {"sheets": "/".join(wb.sheetnames)}
-
-    ws = wb["计划购电量"]
-    rows = [r for r in ws.iter_rows(min_row=2, values_only=True) if r[0] is not None]
-    chk["计划表行数"] = len(rows)
-    chk["计划购电量勾稽差/kWh"] = float(abs(sum(float(r[145]) for r in rows) - out["xp"].sum()))
-    chk["计划购电费勾稽差/元"] = float(abs(sum(float(r[146]) for r in rows)
-                                       - sum(float(price @ out["xp"][i]) for i in range(N_Q3))))
-
-    ws = wb["调整购电量"]
-    rows = [r for r in ws.iter_rows(min_row=2, values_only=True) if r[0] is not None]
-    chk["调整表行数"] = len(rows)
-    chk["调整购电量勾稽差/kWh"] = float(abs(sum(float(r[145]) for r in rows) - out["xa"].sum()))
-
-    ws = wb["充放电量"]
-    rows = [r for r in ws.iter_rows(min_row=2, values_only=True) if r[1] is not None]
-    chk["充放表行数"] = len(rows)
-    ev = [float(r[5]) for r in rows if r[4] in ("00:00", "24:00") and r[5] is not None]
-    chk["储能端点最大偏离6000/kWh"] = float(max(abs(v - 6000.0) for v in ev))
-
-    ws = wb["紧急购电量"]
-    kw = sum(float(r[2]) for r in ws.iter_rows(min_row=2, values_only=True) if r[2] is not None)
-    chk["紧急表电量勾稽差/kWh"] = float(abs(kw - out["e"].sum()))
-    wb.close()
-    return chk
-
-
 def make_figures(daily, base_noadj, base_off, out, dates):
+    """Q3 论文图：三策略费用构成、逐日紧急购电、逐日调整量分布。"""
     import matplotlib.pyplot as plt
 
     # 1) 策略费用对比（三策略 × 三构成）
@@ -217,6 +141,7 @@ def main():
     log = pm.get_logger("q3")
     t0 = time.time()
     data = qp.load_extended()
+    # 历史权重参数平滑 β=0.1（只对抖动的 W=1 光伏权重有效，见 Q2E 回测结论）
     data["U_SMOOTH"] = qp.make_smooth_u(data, BETA)
     print("基线对照……")
     base_noadj = run_baseline(data, "无调整（官方）", adj_hours=())
@@ -236,6 +161,7 @@ def main():
     make_figures(daily, base_noadj, base_off, out, data["dates"])
     daily.to_csv(ROOT / "code" / "outputs" / "q3_daily.csv", index=False, encoding="utf-8-sig")
 
+    # 场景池无前视硬校验：采样日序号必须小于目标日
     day_idx = np.arange(DAY_START, DAY_START + N_Q3)
     chk["场景池前视违规天数"] = int(
         (daily["场景最大日序号"].to_numpy() >= day_idx).sum()
@@ -260,7 +186,7 @@ def main():
         note=(
             "主方案：0:00 计划用组合预测（λ=0.7·官方f0 + 0.3·历史口E，历史权重参数平滑 β=0.1）；"
             "6/12/18 点用同组合口径的最新预报调整；6:00/12:00 叠加无前视场景对冲"
-            "（残差块仅取自目标日之前，10 情景）；逐槽因果执行（q2.exec_segment_causal，"
+            "（残差块仅取自目标日之前，10 情景）；逐槽因果执行（core.causal.exec_segment_causal，"
             "不读取未来实际值），缺口 5 倍紧急。结算 = Σ[p·x_adj + 0.5p|x_plan−x_adj|] + 5Σp·e。"
             "result3.xlsx 已生成并回读校验；图 figures/Q3_策略费用对比.pdf、Q3_逐日紧急购电.pdf、"
             "Q3_调整量分布.pdf；逐日表 code/outputs/q3_daily.csv。"

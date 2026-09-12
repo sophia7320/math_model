@@ -19,6 +19,7 @@ import pandas as pd
 import program as pm
 from solve import q2
 from solve.common import DATA_C, E0, ROOT, T
+from solve.models.price import forecast_price  # 唯一实现（models/price.py），此处再导出
 
 DAY_START = q2.REPORT_START      # 31
 N_DAY = q2.N_DAY                 # 365
@@ -28,11 +29,6 @@ def simplex_grid(step: float = 0.1):
     n = int(round(1.0 / step))
     return [(i / n, j / n, (n - i - j) / n)
             for i in range(n + 1) for j in range(n + 1 - i)]
-
-
-def forecast_price(D, v, p4, p_typ):
-    """三源预测（kW 同量纲，元/kWh）；D 需要 ≥7。"""
-    return (v[0] * p4[D - 1] + v[1] * p4[D - 7] + v[2] * p_typ)
 
 
 def mae_of(p4, p_typ, v, days):
