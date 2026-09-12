@@ -33,10 +33,10 @@ def _init(payload):
 
 
 def _task(t):
-    vi, D, n_scen, pmm, plb, lam, seed = t
+    vi, D, n_scen, pmm, plb, lam, seed, e_start = t
     r = qp.simulate_day_rt_hedge(
         _P, D, lam, adj_lam=lam, n_scen=n_scen, seed=seed,
-        pool_min_month=pmm, pool_lookback=plb,
+        pool_min_month=pmm, pool_lookback=plb, e_start=e_start,
     )
     return (vi, D, float(r["plan_cost"]), float(r["adjust_net"]), float(r["emerg"]),
             float(r["e"].sum()), int(r.get("scenario_max_day", -1)))
@@ -80,8 +80,19 @@ def main():
     data = qp.load_extended()
     data["U_SMOOTH"] = qp.make_smooth_u(data, BETA)
 
-    tasks = [(vi, D, v["n_scen"], v["pmm"], v["plb"], v["lam"], v["seed"])
-             for vi, (_, v) in enumerate(VARIANTS) for D in DAYS]
+    # 每个配置先顺序推导 2 日滚动产生的跨日 SOC；正式日模拟仍可并行，
+    # 因为逐日执行被约束到该日自由优化出的计划末端。
+    starts = np.zeros((len(VARIANTS), len(DAYS)))
+    for vi, (_, v) in enumerate(VARIANTS):
+        E = float(qp.E0)
+        for di, D in enumerate(DAYS):
+            starts[vi, di] = E
+            _x, E_plan, _ = qp.plan_two_day(data, D, v["lam"], E)
+            E = float(E_plan[-1])
+    tasks = [
+        (vi, D, v["n_scen"], v["pmm"], v["plb"], v["lam"], v["seed"], starts[vi, di])
+        for vi, (_, v) in enumerate(VARIANTS) for di, D in enumerate(DAYS)
+    ]
     n = len(VARIANTS)
     plan = np.zeros(n)
     adj = np.zeros(n)
@@ -118,7 +129,7 @@ def main():
     record(
         "问题三 主方案灵敏度：情景数 / 场景池窗口 / 组合权重（因果口径）",
         out,
-        note=("对正式主方案（组合 λ=0.7、三点调整、情景对冲、逐槽因果）做单因素灵敏度："
+        note=("对正式主方案（2 日滚动、组合 λ=0.7、三点调整、情景对冲、逐槽因果）做单因素灵敏度："
               "对冲情景数使用 seed=7/17/27 检查随机稳定性，并单独改变场景池回看窗口、"
               "组合权重 λ；场景前视违规天数应全为 0。"
               "数据 code/outputs/q3_sensitivity.csv。"),

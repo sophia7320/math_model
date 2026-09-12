@@ -239,6 +239,91 @@ def evaluate(model: AdaptiveWeightModel, configs: list[dict],
     return df, daily_plan, daily_emerg
 
 
+def simulate_two_day(model: AdaptiveWeightModel, seq, kappa: float, margin: float,
+                     detail: bool = False):
+    """2 日滚动正式口径：日末 SOC 自由、跨日连续，48 小时远端回到 E0。"""
+    E = float(E0)
+    rows = []
+    x_plans = np.zeros((q2.N_DAY, q2.T)) if detail else None
+    recs = [None] * q2.N_DAY if detail else None
+    for i, d in enumerate(REP):
+        w, u = seq[i]
+        l0, p0 = forecast_kw(model, w, u, d)
+        # 次日预测在 d 日 0:00 形成：负荷的 d+1−7/d+1−14 已知；
+        # 光伏不能读取尚未实现的 P[d]，只能沿用 P[d−1]/P[d−2]/典型日组合。
+        l1 = w[0] * model.L[d - 6] + w[1] * model.L[d - 13] + w[2] * model.L_typ
+        p1 = u[0] * model.P[d - 1] + u[1] * model.P[d - 2] + u[2] * model.P_typ
+        l0 = np.clip(l0 * kappa, 0.0, None)
+        l1 = np.clip(l1 * kappa, 0.0, None)
+        p0 = np.clip(p0 - margin, 0.0, None)
+        p1 = np.clip(p1 - margin, 0.0, None)
+        xh, Eh, _ = q2.plan_horizon(
+            np.tile(model.price, 2), np.concatenate([l0, l1]) / 6.0,
+            np.concatenate([p0, p1]) / 6.0, E, E0, eps=EPS_PLAN,
+        )
+        x = xh[:q2.T]
+        e_day_end = float(Eh[q2.T - 1])
+        ex = q2.exec_day_causal(
+            model.price, model.L[d] / 6.0, model.P[d] / 6.0, x, E,
+            e_end=e_day_end,
+        )
+        if detail:
+            x_plans[d] = x
+            recs[d] = {
+                "c": ex["c"], "d": ex["d"], "s": ex["s"], "e": ex["e"],
+                "E": ex["E"], "E_start": E, "E_end": float(ex["E"][-1]),
+            }
+        rows.append({
+            "日期": model.dates[d],
+            "计划购电量/kWh": float(x.sum()),
+            "计划购电费/元": float(model.price @ x),
+            "紧急购电量/kWh": float(ex["e"].sum()),
+            "紧急购电费/元": float(q2.EMERG_MULT * (model.price @ ex["e"])),
+            "日初SOC/kWh": E,
+            "日末SOC/kWh": float(ex["E"][-1]),
+        })
+        E = float(ex["E"][-1])
+    df = pd.DataFrame(rows)
+    return (df, x_plans, recs) if detail else df
+
+
+def rolling_holdout_search() -> pd.DataFrame:
+    """在 2 日滚动结构下做小范围开发/冻结验证，正式参数只由 2–6 月选择。"""
+    pm.init(root=str(ROOT))
+    model = AdaptiveWeightModel().load().build_table()
+    split_at = next(i for i, d in enumerate(REP) if model.dates[d] == "2025-07-01")
+    rows = []
+    t0 = time.time()
+    for h in (3.0, 5.0, 7.0):
+        seq = seqs_ewma(model, h)
+        for kappa in (1.01, 1.015, 1.02):
+            for margin in (25.0, 50.0, 75.0):
+                df = simulate_two_day(model, seq, kappa, margin)
+                costs = df["计划购电费/元"].to_numpy() + df["紧急购电费/元"].to_numpy()
+                rows.append({
+                    "配置": f"EWMA h={h:g} κ={kappa:g}+m={margin:g}",
+                    "h": h, "kappa": kappa, "margin": margin,
+                    "开发期(2-6月)/万元": round(float(costs[:split_at].sum()) / 1e4, 1),
+                    "冻结验证期(7-12月)/万元": round(float(costs[split_at:].sum()) / 1e4, 1),
+                    "全年描述值/万元": round(float(costs.sum()) / 1e4, 1),
+                })
+                print(f"  2日滚动候选 {len(rows)}/27（{time.time() - t0:.0f}s）")
+    out = pd.DataFrame(rows).sort_values(
+        ["开发期(2-6月)/万元", "冻结验证期(7-12月)/万元"]
+    ).reset_index(drop=True)
+    out["开发期选中"] = out.index == 0
+    out["验证期排名"] = out["冻结验证期(7-12月)/万元"].rank(method="min").astype(int)
+    out.to_csv(pm.outputs_dir() / "q2e_tune_2day_holdout.csv", index=False, encoding="utf-8-sig")
+    record(
+        "问题二 2日滚动参数时间留出验证",
+        out.head(10),
+        note=("每个候选均按 48 小时预测窗口逐日滚动；当前日末 SOC 不固定并跨日传递，"
+              "仅视野远端回到 6000 kWh。2–6 月选参，7–12 月冻结验证；完整表见 "
+              "code/outputs/q2e_tune_2day_holdout.csv。"),
+    )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
@@ -534,10 +619,10 @@ def main():
 
 
 def write_result2_tuned(W: float = 5.0, kappa: float = 1.015,
-                        margin: float = 50.0) -> dict:
-    """把时间留出选定配置写入 ``results/result2.xlsx``。
+                        margin: float = 75.0) -> dict:
+    """把 2 日滚动时间留出选定配置写入 ``results/result2.xlsx``。
 
-    流程：EWMA 权重序列 → 逐日（计划用 κ/m 修正后的预测）→ 逐槽因果执行 →
+    流程：EWMA 权重序列 → 48 小时计划（当前日末 SOC 自由）→ 逐槽因果执行 →
     备份现官方文件 → 写出 + 回读校验 + 报告。默认参数只由 2–6 月开发期选择，
     7–12 月作为冻结验证期，不参与选择。
     """
@@ -548,40 +633,21 @@ def write_result2_tuned(W: float = 5.0, kappa: float = 1.015,
     model = AdaptiveWeightModel().load().build_table()
     seq = seqs_ewma(model, W)
 
-    x_plans = np.zeros((q2.N_DAY, q2.T))
-    recs = [None] * q2.N_DAY
-    rows = []
-    for i, d in enumerate(REP):
-        w, u = seq[i]
-        l_kw, p_kw = forecast_kw(model, w, u, d)
-        l_kw = np.clip(l_kw * kappa, 0.0, None)
-        p_kw = np.clip(p_kw - margin, 0.0, None)
-        x, _E, _ = q2.plan_day(model.price, l_kw / 6.0, p_kw / 6.0, E0, eps=EPS_PLAN)
-        ex = q2.exec_day_causal(model.price, model.L[d] / 6.0, model.P[d] / 6.0, x, E0)
-        x_plans[d] = x
-        recs[d] = {"c": ex["c"], "d": ex["d"], "s": ex["s"], "e": ex["e"],
-                   "E": ex["E"], "E_start": E0, "E_end": float(ex["E"][-1])}
-        rows.append({
-            "日期": model.dates[d],
-            "计划购电量/kWh": float(x.sum()), "计划购电费/元": float(model.price @ x),
-            "紧急购电量/kWh": float(ex["e"].sum()),
-            "紧急购电费/元": float(q2.EMERG_MULT * (model.price @ ex["e"])),
-        })
-    df = pd.DataFrame(rows)
+    df, x_plans, recs = simulate_two_day(model, seq, kappa, margin, detail=True)
     plan = float(df["计划购电费/元"].sum())
     emerg = float(df["紧急购电费/元"].sum())
 
     cur = RESULTS_DIR / "result2.xlsx"
     if cur.exists():
-        backup = pm.outputs_dir() / "result2_pre_holdout_backup.xlsx"
+        backup = pm.outputs_dir() / "result2_pre_2day_backup.xlsx"
         if not backup.exists():
             shutil.copy2(cur, backup)
-            log.info("留出验证修正前 result2 备份 -> {}", backup)
+            log.info("2 日滚动修正前 result2 备份 -> {}", backup)
     out = q2.write_result2(model.dates, model.price, x_plans, recs, out_name="result2.xlsx")
     checks = _verify_result2(out, df)
     pm.save_outputs(df, "q2e_tuned_daily")
     record(
-        "问题二 口径E（时间留出选定：EWMA h=5 + κ=1.015 + m=50）官方 result2",
+        f"问题二 口径E（2日滚动时间留出选定：EWMA h={W:g} + κ={kappa:g} + m={margin:g}）官方 result2",
         {
             "计划购电费/万元": round(plan / 1e4, 1),
             "紧急购电费/万元": round(emerg / 1e4, 1),
@@ -590,15 +656,16 @@ def write_result2_tuned(W: float = 5.0, kappa: float = 1.015,
             **checks,
         },
         note=(
-            "官方 results/result2.xlsx 由时间留出配置生成：2–6 月开发期选择 EWMA 半衰期 5 天、"
-            "κ=1.015（负荷抬升）、m=50 kW（光伏折扣），7–12 月冻结验证不参与选参；"
-            "计划 LP 与因果执行与口径 E 相同。旧 W=7 版仍保留在 "
+            f"官方 results/result2.xlsx 由 2 日滚动时间留出配置生成：2–6 月开发期选择 EWMA "
+            f"h={W:g}、κ={kappa:g}、m={margin:g} kW，7–12 月冻结验证不参与选参；"
+            "当前日末 SOC 不固定并传递到下一日，仅 48 小时视野远端回到 6000 kWh。"
+            "旧 W=7 日循环版仍保留在 "
             "code/outputs/result2_W7_backup.xlsx，留出修正前版本保留在 "
-            "code/outputs/result2_pre_holdout_backup.xlsx；复现："
+            "code/outputs/result2_pre_2day_backup.xlsx；复现："
             "uv run python -m solve.q2_tune --result2。"
         ),
     )
-    log.info("result2.xlsx（时间留出选定）写出完成：{}，总费用 {:.1f} 万元（计划 {:.1f} + 紧急 {:.1f}）",
+    log.info("result2.xlsx（2 日滚动时间留出选定）写出完成：{}，总费用 {:.1f} 万元（计划 {:.1f} + 紧急 {:.1f}）",
              out, (plan + emerg) / 1e4, plan / 1e4, emerg / 1e4)
     return {"plan": plan, "emerg": emerg, "checks": checks, "out": out}
 
@@ -639,6 +706,8 @@ def make_weight_figure(W: float = 5.0) -> None:
 if __name__ == "__main__":
     if "--result2" in __import__("sys").argv:
         write_result2_tuned()
+    elif "--rolling-holdout" in __import__("sys").argv:
+        rolling_holdout_search()
     elif "--fig-weights" in __import__("sys").argv:
         make_weight_figure()
     else:

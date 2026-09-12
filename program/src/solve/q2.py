@@ -64,6 +64,8 @@ def load_all() -> dict:
 
     a1 = pm.read_table(DATA_C / "附件1.xlsx")
     price = a1["电价"].to_numpy(float)
+    load_typ = a1["小区负载"].to_numpy(float)
+    pv_typ = a1["光伏发电预测功率"].to_numpy(float)
 
     fc3 = pm.read_table(DATA_C / "附件3.xlsx")
     fc0 = np.zeros((N_DAY, 24))
@@ -99,6 +101,7 @@ def load_all() -> dict:
     return {
         "dates": dates, "load": load, "pv_act": pv_act, "price": price,
         "fc0": fc0, "months": months, "typ_hm": typ_hm, "Z": Z, "R0": R0,
+        "load_typ": load_typ, "pv_typ": pv_typ,
     }
 
 
@@ -131,7 +134,7 @@ def _ix(b: int, t: int) -> int:
 
 
 def plan_day(price, load_kwh, pv_kwh, e_start, eps=0.0):
-    """当日计划 LP：min Σp·x + eps·Σ(c+d)；储能循环 E(0)=E(24)=e_start。
+    """单日循环计划 LP（仅保留作历史对照）：E(0)=E(24)=e_start。
 
     eps > 0 为极小正则项，用于在等价位内唯一化购电/充放方案（口径 E 标定）；
     默认 0 与原有口径完全一致。返回 (x, E, res)。
@@ -169,6 +172,52 @@ def plan_day(price, load_kwh, pv_kwh, e_start, eps=0.0):
     if not res.success:
         raise RuntimeError(f"计划 LP 失败：{res.message}")
     return res.x[0:T], res.x[4 * T:5 * T], res
+
+
+def plan_horizon(price_h, load_h, pv_h, e_start, e_terminal=E0, eps=0.0):
+    """有限视野计划 LP；正式滚动策略使用 2 日（288 槽）视野。
+
+    只约束视野最远端 ``E(H)=e_terminal``，中间每个自然日的末端 SOC 都是
+    优化变量。每日只执行前 144 槽，次日以真实末端 SOC 重新求解。
+    """
+    price_h = np.asarray(price_h, dtype=float)
+    load_h = np.asarray(load_h, dtype=float)
+    pv_h = np.asarray(pv_h, dtype=float)
+    H = len(price_h)
+    if len(load_h) != H or len(pv_h) != H:
+        raise ValueError("price/load/pv 的滚动视野长度必须一致")
+    n = 5 * H
+    c_obj = np.zeros(n)
+    c_obj[0:H] = price_h
+    c_obj[H:3 * H] = eps
+    A_eq = lil_matrix((2 * H + 1, n))
+    b_eq = np.zeros(2 * H + 1)
+    for t in range(H):
+        A_eq[t, t] = 1.0
+        A_eq[t, H + t] = -1.0
+        A_eq[t, 2 * H + t] = 1.0
+        A_eq[t, 3 * H + t] = -1.0
+        b_eq[t] = load_h[t] - pv_h[t]
+        r = H + t
+        A_eq[r, 4 * H + t] = 1.0
+        if t:
+            A_eq[r, 4 * H + t - 1] = -1.0
+        A_eq[r, H + t] = -ETA
+        A_eq[r, 2 * H + t] = 1.0 / ETA
+        b_eq[r] = e_start if t == 0 else 0.0
+    A_eq[2 * H, 5 * H - 1] = 1.0
+    b_eq[2 * H] = e_terminal
+    bounds = (
+        [(0.0, None)] * H
+        + [(0.0, P_MAX_E)] * H
+        + [(0.0, P_MAX_E)] * H
+        + [(0.0, float(v)) for v in pv_h]
+        + [(E_MIN, E_MAX)] * H
+    )
+    res = pm.optimize.solve_lp(c_obj, A_eq=csr_matrix(A_eq), b_eq=b_eq, bounds=bounds)
+    if not res.success:
+        raise RuntimeError(f"滚动视野计划 LP 失败：{res.message}")
+    return res.x[0:H], res.x[4 * H:5 * H], res
 
 
 def exec_day(price, load_kwh, pv_kwh, x_plan, e_start):
@@ -328,8 +377,19 @@ def run_deterministic(data: dict):
     for d in range(N_DAY):
         pv_fc = _hour_to_slots(fc0[d]) / 6.0          # kW → kWh/时段
         load_kwh = load[d] / 6.0
-        x, _E_plan, _ = plan_day(price, load_kwh, pv_fc, E)
-        ex = exec_day_causal(price, load_kwh, pv_act[d] / 6.0, x, E)
+        # 48 小时滚动：次日无对应 0:00 官方预报，使用典型日作保守占位；
+        # 当前日末 SOC 由两日优化决定并跨日传递。
+        xh, Eh, _ = plan_horizon(
+            np.tile(price, 2),
+            np.concatenate([load_kwh, data["load_typ"] / 6.0]),
+            np.concatenate([pv_fc, data["pv_typ"] / 6.0]),
+            E, E0,
+        )
+        x = xh[:T]
+        e_day_end = float(Eh[T - 1])
+        ex = exec_day_causal(
+            price, load_kwh, pv_act[d] / 6.0, x, E, e_end=e_day_end
+        )
         recs.append({
             "x": x, "plan_cost": float(price @ x),
             "c": ex["c"], "d": ex["d"], "s": ex["s"], "e": ex["e"], "E": ex["E"],
@@ -346,7 +406,7 @@ def run_deterministic(data: dict):
 # ---------------------------------------------------------------------------
 # 蒙特卡洛：年度总成本分布
 # ---------------------------------------------------------------------------
-def run_mc(data, x_plans, e_start_feb, n_years=100, seed=42):
+def run_mc(data, x_plans, e_start_feb, e_targets, n_years=100, seed=42):
     """固定计划，对 2.1–12.31 重采样整日误差块，评估年度紧急费用分布。"""
     price = data["price"]
     load, fc0, residuals, months = (
@@ -362,7 +422,10 @@ def run_mc(data, x_plans, e_start_feb, n_years=100, seed=42):
             pool = np.flatnonzero(months == months[d])
             zi = int(rng.choice(pool))
             pv_s = _hour_to_slots(_scenario_from_residual(fc0[d], residuals[zi])) / 6.0
-            ex = exec_day_causal(price, load[d] / 6.0, pv_s, x_plans[d], E)
+            ex = exec_day_causal(
+                price, load[d] / 6.0, pv_s, x_plans[d], E,
+                e_end=float(e_targets[d]),
+            )
             emerg_kwhs[rep] += float(ex["e"].sum())
             emerg_costs[rep] += float(EMERG_MULT * (price @ ex["e"]))
             E = float(ex["E"][-1])
@@ -375,6 +438,7 @@ def run_mc(data, x_plans, e_start_feb, n_years=100, seed=42):
 # 对冲计划（两阶段场景 LP：期望费用最小化）
 # ---------------------------------------------------------------------------
 def hedge_day(price, load_kwh, fc0_row, residual_pool, e_start,
+              e_terminal,
               n_scen=20, rng=None):
     """两阶段场景 LP：计划 x 所有场景共用；每场景储能再调度 + 紧急购电。
 
@@ -425,7 +489,7 @@ def hedge_day(price, load_kwh, fc0_row, residual_pool, e_start,
         r0 = s * (2 * T + 1)
         b_eq[r0:r0 + T] = load_kwh - pv_scen[s]
         b_eq[r0 + T] = e_start
-        b_eq[r0 + 2 * T] = e_start
+        b_eq[r0 + 2 * T] = e_terminal
 
     bounds = [(0.0, None)] * T
     for _ in range(n_scen):
@@ -437,7 +501,7 @@ def hedge_day(price, load_kwh, fc0_row, residual_pool, e_start,
     return res.x[0:T], res
 
 
-def run_hedge(data: dict, n_scen: int = 20, seed: int = 7):
+def run_hedge(data: dict, e_starts, e_targets, n_scen: int = 20, seed: int = 7):
     """对 2.1–12.31 逐日求解无前视对冲计划（期望费用最小）。
 
     目标日 d 的误差场景只从其前 90 天（不足则用全部已有日）的残差块采样。
@@ -455,7 +519,8 @@ def run_hedge(data: dict, n_scen: int = 20, seed: int = 7):
         if not len(residual_hist) or int(pool_days.max()) >= d:
             raise RuntimeError(f"对冲场景池为空：d={d}")
         xh[d], _ = hedge_day(
-            price, load[d] / 6.0, fc0[d], residual_hist, E0,
+            price, load[d] / 6.0, fc0[d], residual_hist,
+            float(e_starts[d]), float(e_targets[d]),
             n_scen=n_scen, rng=rng,
         )
         if (d - REPORT_START + 1) % 50 == 0:
@@ -638,7 +703,9 @@ def run_q2(n_mc: int = 100, seed: int = 42, hedge: bool = True,
     mc_costs = None
     if n_mc > 0:
         t1 = time.time()
-        mc_costs, _mc_kwhs = run_mc(data, x_plans, recs[REPORT_START]["E_start"],
+        e_targets = np.array([r["E_end"] for r in recs], dtype=float)
+        e_starts = np.array([r["E_start"] for r in recs], dtype=float)
+        mc_costs, _mc_kwhs = run_mc(data, x_plans, recs[REPORT_START]["E_start"], e_targets,
                                     n_years=n_mc, seed=seed)
         log.info("蒙特卡洛完成（{} 年，用时 {:.1f}s）", n_mc, time.time() - t1)
         total = plan_cost + mc_costs
@@ -672,10 +739,10 @@ def run_q2(n_mc: int = 100, seed: int = 42, hedge: bool = True,
             import matplotlib.pyplot as plt
 
             t2 = time.time()
-            x_hedge = run_hedge(data, n_scen=20, seed=7)
+            x_hedge = run_hedge(data, e_starts, e_targets, n_scen=20, seed=7)
             log.info("对冲计划求解完成（用时 {:.1f}s）", time.time() - t2)
             plan_cost_h = float(sum(float(data["price"] @ x_hedge[d]) for d in rep))
-            mc_h, _ = run_mc(data, x_hedge, recs[REPORT_START]["E_start"],
+            mc_h, _ = run_mc(data, x_hedge, recs[REPORT_START]["E_start"], e_targets,
                              n_years=n_mc, seed=seed)
             total_h = plan_cost_h + mc_h
             p95h = float(np.percentile(total_h, 95))

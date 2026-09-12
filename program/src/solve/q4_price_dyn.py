@@ -27,6 +27,12 @@ def forecast_price(D, v, p4, p_typ):
     return v[0] * p4[D - 1] + v[1] * p4[D - 7] + v[2] * p_typ
 
 
+def forecast_price_next_asof(D, v, p4, p_typ):
+    if D < 7:
+        return p_typ
+    return v[0] * p4[D - 1] + v[1] * p4[D - 6] + v[2] * p_typ
+
+
 def run_year_vseq(p4, p_typ, data, v_seq):
     """按给定 v 序列模拟全年（v_seq: {day: v}；缺省天用纯典型日），返回 334 天费用。"""
     load = data["load"]; pv_act = data["pv_act"]; fc0 = data["fc0"]
@@ -35,9 +41,19 @@ def run_year_vseq(p4, p_typ, data, v_seq):
     for D in range(N_DAY):
         v = v_seq.get(D, (0.0, 0.0, 1.0))
         p_hat = forecast_price(D, v, p4, p_typ) if D >= 7 else p_typ
-        x, _E_plan, _ = q2.plan_day(p_hat, qp.hist_load_forecast(data, D) / 6.0,
-                                    q2._hour_to_slots(fc0[D]) / 6.0, E, eps=1e-3)
-        ex = q2.exec_day_causal(p4[D], load[D] / 6.0, pv_act[D] / 6.0, x, E)
+        p_hat1 = forecast_price_next_asof(D, v, p4, p_typ)
+        xh, Eh, _ = q2.plan_horizon(
+            np.concatenate([p_hat, p_hat1]),
+            np.concatenate([qp.hist_load_forecast_asof(data, D, D),
+                            qp.hist_load_forecast_asof(data, D + 1, D)]) / 6.0,
+            np.concatenate([q2._hour_to_slots(fc0[D]),
+                            qp.hist_forecast_asof(data, D + 1, D)]) / 6.0,
+            E, E0, eps=1e-3,
+        )
+        x, e_day_end = xh[:T], float(Eh[T - 1])
+        ex = q2.exec_day_causal(
+            p4[D], load[D] / 6.0, pv_act[D] / 6.0, x, E, e_end=e_day_end
+        )
         E = float(ex["E"][-1])
         if D >= DAY_START:
             tot += float(p4[D] @ x + q2.EMERG_MULT * (p4[D] @ ex["e"]))
@@ -59,7 +75,8 @@ def main():
     v_star = {}
     for D in range(DAY_START, N_DAY):
         i0 = max(DAY_START, D - 7)
-        j = int(np.argmin(daily_costs[i0:D].mean(axis=0)))
+        j = (grid.index((0.0, 0.0, 1.0)) if i0 == D
+             else int(np.argmin(daily_costs[i0:D].mean(axis=0))))
         v_star[D] = grid[j]
     print(f"v* 逐日选择：v1 均值 {np.mean([v[0] for v in v_star.values()]):.2f}、"
           f"v2 {np.mean([v[1] for v in v_star.values()]):.2f}、"

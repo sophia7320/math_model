@@ -36,6 +36,13 @@ def forecast_price(D, v, p4, p_typ):
     return (v[0] * p4[D - 1] + v[1] * p4[D - 7] + v[2] * p_typ)
 
 
+def forecast_price_next_asof(D, v, p4, p_typ):
+    """在 D 日 0:00 预测 D+1 电价，不读取 P(D)。"""
+    if D < 7:
+        return p_typ
+    return v[0] * p4[D - 1] + v[1] * p4[D - 6] + v[2] * p_typ
+
+
 def mae_of(p4, p_typ, v, days):
     errs = [np.abs(forecast_price(D, v, p4, p_typ) - p4[D]).mean() for D in days]
     return float(np.mean(errs))
@@ -49,10 +56,20 @@ def run_year(p4, p_typ, data, v, days):
     emerg_kwh = 0.0
     for D in range(N_DAY):
         p_hat = forecast_price(D, v, p4, p_typ) if D >= 7 else p4[D]
-        load_kwh = qp.hist_load_forecast(data, D) / 6.0
-        pv_fc = q2._hour_to_slots(fc0[D]) / 6.0
-        x, _E_plan, _ = q2.plan_day(p_hat, load_kwh, pv_fc, E, eps=1e-3)
-        ex = q2.exec_day_causal(p4[D], data["load"][D] / 6.0, pv_act[D] / 6.0, x, E)
+        p_hat1 = forecast_price_next_asof(D, v, p4, p_typ)
+        load0 = qp.hist_load_forecast_asof(data, D, D) / 6.0
+        load1 = qp.hist_load_forecast_asof(data, D + 1, D) / 6.0
+        pv0 = q2._hour_to_slots(fc0[D]) / 6.0
+        pv1 = qp.hist_forecast_asof(data, D + 1, D) / 6.0
+        xh, Eh, _ = q2.plan_horizon(
+            np.concatenate([p_hat, p_hat1]), np.concatenate([load0, load1]),
+            np.concatenate([pv0, pv1]), E, E0, eps=1e-3,
+        )
+        x, e_day_end = xh[:T], float(Eh[T - 1])
+        ex = q2.exec_day_causal(
+            p4[D], data["load"][D] / 6.0, pv_act[D] / 6.0, x, E,
+            e_end=e_day_end,
+        )
         E = float(ex["E"][-1])
         if D >= DAY_START:
             tot_cost += float(p4[D] @ x + q2.EMERG_MULT * (p4[D] @ ex["e"]))
@@ -93,11 +110,19 @@ def main():
     for D in range(N_DAY):
         for j, v in enumerate(grid):
             p_hat = forecast_price(D, v, p4, p_typ) if D >= 7 else p4[D]
-            load_kwh = qp.hist_load_forecast(data, D) / 6.0
-            pv_fc = q2._hour_to_slots(data["fc0"][D]) / 6.0
-            x, _E_plan, _ = q2.plan_day(p_hat, load_kwh, pv_fc, E_state[j], eps=1e-3)
+            p_hat1 = forecast_price_next_asof(D, v, p4, p_typ)
+            load0 = qp.hist_load_forecast_asof(data, D, D) / 6.0
+            load1 = qp.hist_load_forecast_asof(data, D + 1, D) / 6.0
+            pv0 = q2._hour_to_slots(data["fc0"][D]) / 6.0
+            pv1 = qp.hist_forecast_asof(data, D + 1, D) / 6.0
+            xh, Eh, _ = q2.plan_horizon(
+                np.concatenate([p_hat, p_hat1]), np.concatenate([load0, load1]),
+                np.concatenate([pv0, pv1]), E_state[j], E0, eps=1e-3,
+            )
+            x, e_day_end = xh[:T], float(Eh[T - 1])
             ex = q2.exec_day_causal(
-                p4[D], data["load"][D] / 6.0, data["pv_act"][D] / 6.0, x, E_state[j]
+                p4[D], data["load"][D] / 6.0, data["pv_act"][D] / 6.0, x, E_state[j],
+                e_end=e_day_end,
             )
             E_state[j] = float(ex["E"][-1])
             daily_costs[D, j] = float(p4[D] @ x + q2.EMERG_MULT * (p4[D] @ ex["e"]))
