@@ -7,8 +7,8 @@
   不读取未来实际值；`exec_day` 事后 LP 仅作前视下界），缺口按 5 倍电价紧急购电；
 - 各日相互独立（储能日循环）；结果自 2025-02-01 起报送。
 
-概率扩展：以附件 3 预报误差的“整日标准化误差块”重采样，蒙特卡洛评估年度总成本分布
-（误差模型参数见 `C题_预报误差分析.md`）。
+概率扩展：以附件 3 的“整日原始残差块（预报−实际）”重采样，蒙特卡洛评估年度
+总成本分布；对冲决策的场景池严格限于目标日之前，离线风险评估则使用同月全年样本。
 """
 from __future__ import annotations
 
@@ -84,11 +84,13 @@ def load_all() -> dict:
 
     # 标准化误差日块 Z[d, k]（0:00 预报，k=1..24）
     Z = np.zeros((N_DAY, 24))
+    R0 = np.zeros((N_DAY, 24))  # 原始残差：预报 − 实际（用于严格因果块重采样）
     ks = np.arange(1, 25)
     for i in range(N_DAY):
         m = months[i]
         typ = typ_hm[1:25, m]
         err = fc0[i] - pv_act[i, 6 * ks - 1]
+        R0[i] = err
         mask = typ > 100
         zz = np.zeros(24)
         zz[mask] = (err[mask] / typ[mask] - _mu(ks[mask])) / _sigma(ks[mask])
@@ -96,7 +98,7 @@ def load_all() -> dict:
 
     return {
         "dates": dates, "load": load, "pv_act": pv_act, "price": price,
-        "fc0": fc0, "months": months, "typ_hm": typ_hm, "Z": Z,
+        "fc0": fc0, "months": months, "typ_hm": typ_hm, "Z": Z, "R0": R0,
     }
 
 
@@ -112,7 +114,13 @@ def _scenario_hourly(fc0_row, month, z_row, typ_hm) -> np.ndarray:
     ks = np.arange(1, 25)
     typ = typ_hm[1:25, month]
     err = typ * (_mu(ks) + _sigma(ks) * z_row)
-    return np.clip(fc0_row + err, 0.0, None)
+    # err = 预报 − 实际，因此实际情景 = 预报 − err。
+    return np.clip(fc0_row - err, 0.0, None)
+
+
+def _scenario_from_residual(fc0_row, residual_row) -> np.ndarray:
+    """由原始残差块生成小时实际情景；残差定义为“预报 − 实际”。"""
+    return np.clip(np.asarray(fc0_row, float) - np.asarray(residual_row, float), 0.0, None)
 
 
 # ---------------------------------------------------------------------------
@@ -341,8 +349,8 @@ def run_deterministic(data: dict):
 def run_mc(data, x_plans, e_start_feb, n_years=100, seed=42):
     """固定计划，对 2.1–12.31 重采样整日误差块，评估年度紧急费用分布。"""
     price = data["price"]
-    load, fc0, Z, months, typ_hm = (
-        data["load"], data["fc0"], data["Z"], data["months"], data["typ_hm"],
+    load, fc0, residuals, months = (
+        data["load"], data["fc0"], data["R0"], data["months"],
     )
     rng = np.random.default_rng(seed)
     emerg_costs = np.zeros(n_years)
@@ -351,8 +359,9 @@ def run_mc(data, x_plans, e_start_feb, n_years=100, seed=42):
     for rep in range(n_years):
         E = float(e_start_feb)
         for d in range(REPORT_START, N_DAY):
-            zi = int(rng.integers(0, N_DAY))
-            pv_s = _hour_to_slots(_scenario_hourly(fc0[d], months[d], Z[zi], typ_hm)) / 6.0
+            pool = np.flatnonzero(months == months[d])
+            zi = int(rng.choice(pool))
+            pv_s = _hour_to_slots(_scenario_from_residual(fc0[d], residuals[zi])) / 6.0
             ex = exec_day_causal(price, load[d] / 6.0, pv_s, x_plans[d], E)
             emerg_kwhs[rep] += float(ex["e"].sum())
             emerg_costs[rep] += float(EMERG_MULT * (price @ ex["e"]))
@@ -365,17 +374,21 @@ def run_mc(data, x_plans, e_start_feb, n_years=100, seed=42):
 # ---------------------------------------------------------------------------
 # 对冲计划（两阶段场景 LP：期望费用最小化）
 # ---------------------------------------------------------------------------
-def hedge_day(price, load_kwh, fc0_row, month, z_pool, typ_hm, e_start,
+def hedge_day(price, load_kwh, fc0_row, residual_pool, e_start,
               n_scen=20, rng=None):
     """两阶段场景 LP：计划 x 所有场景共用；每场景储能再调度 + 紧急购电。
 
-    min  Σp·x + Σ_s [5p·e_s + ε·(c_s + d_s)]
+    等概率情景下目标为期望费用：
+        min  Σp·x + (1/S)·Σ_s [5p·e_s + ε·(c_s + d_s)]
+
+    计划成本只发生一次，场景补救成本必须按概率 ``1/S`` 加权；否则情景数会
+    人为改变风险项相对计划成本的权重。
     """
     if rng is None:
         rng = np.random.default_rng(0)
-    picks = rng.integers(0, len(z_pool), size=n_scen)
+    picks = rng.integers(0, len(residual_pool), size=n_scen)
     pv_scen = [
-        _hour_to_slots(_scenario_hourly(fc0_row, month, z_pool[i], typ_hm)) / 6.0
+        _hour_to_slots(_scenario_from_residual(fc0_row, residual_pool[i])) / 6.0
         for i in picks
     ]
 
@@ -384,9 +397,9 @@ def hedge_day(price, load_kwh, fc0_row, month, z_pool, typ_hm, e_start,
     c_obj[0:T] = price
     for s in range(n_scen):
         base = T + s * 5 * T
-        c_obj[base:base + T] = EPS_THROUGHPUT
-        c_obj[base + T:base + 2 * T] = EPS_THROUGHPUT
-        c_obj[base + 4 * T:base + 5 * T] = EMERG_MULT * price
+        c_obj[base:base + T] = EPS_THROUGHPUT / n_scen
+        c_obj[base + T:base + 2 * T] = EPS_THROUGHPUT / n_scen
+        c_obj[base + 4 * T:base + 5 * T] = EMERG_MULT * price / n_scen
 
     rows = n_scen * (2 * T + 1)
     rr, cc, vv = [], [], []
@@ -430,16 +443,21 @@ def run_hedge(data: dict, n_scen: int = 20, seed: int = 7):
     目标日 d 的误差场景只从其前 90 天（不足则用全部已有日）的残差块采样。
     """
     price, load, fc0 = data["price"], data["load"], data["fc0"]
-    months, Z, typ_hm = data["months"], data["Z"], data["typ_hm"]
+    months, residuals = data["months"], data["R0"]
     rng = np.random.default_rng(seed)
     xh = np.zeros((N_DAY, T))
     t0 = time.time()
     for d in range(REPORT_START, N_DAY):
-        z_hist = Z[max(0, d - 90):d]
-        if not len(z_hist):
+        past = np.arange(max(0, d - 90), d, dtype=int)
+        same = past[months[past] == months[d]]
+        pool_days = same if len(same) >= 14 else past
+        residual_hist = residuals[pool_days]
+        if not len(residual_hist) or int(pool_days.max()) >= d:
             raise RuntimeError(f"对冲场景池为空：d={d}")
-        xh[d], _ = hedge_day(price, load[d] / 6.0, fc0[d], months[d], z_hist, typ_hm,
-                             E0, n_scen=n_scen, rng=rng)
+        xh[d], _ = hedge_day(
+            price, load[d] / 6.0, fc0[d], residual_hist, E0,
+            n_scen=n_scen, rng=rng,
+        )
         if (d - REPORT_START + 1) % 50 == 0:
             print(f"  hedge {d - REPORT_START + 1}/334，用时 {time.time() - t0:.0f}s")
     return xh
@@ -554,7 +572,8 @@ def make_figures(dates, recs, mc_costs, plan_cost_report):
 # ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
-def run_q2(n_mc: int = 100, seed: int = 42, hedge: bool = True) -> dict:
+def run_q2(n_mc: int = 100, seed: int = 42, hedge: bool = True,
+           write_result2_file: bool = False) -> dict:
     pm.init(root=str(ROOT))
     log = pm.get_logger("q2")
     data = load_all()
@@ -608,8 +627,13 @@ def run_q2(n_mc: int = 100, seed: int = 42, hedge: bool = True) -> dict:
     })
     pm.save_outputs(daily, "q2_daily_summary")
 
-    out = write_result2(data["dates"], data["price"], x_plans, recs)
-    log.info("result2.xlsx -> {}", out)
+    if write_result2_file:
+        # 口径 D 仅为使用附件 3 的额外信息对照；正式 result2 由 q2_tune 生成。
+        out = write_result2(
+            data["dates"], data["price"], x_plans, recs,
+            out_name="result2_D_backup.xlsx",
+        )
+        log.info("口径 D 对照结果 -> {}", out)
 
     mc_costs = None
     if n_mc > 0:
@@ -633,8 +657,9 @@ def run_q2(n_mc: int = 100, seed: int = 42, hedge: bool = True) -> dict:
                 "年度紧急费用P95/元": float(np.percentile(mc_costs, 95)),
             },
             note=(
-                "固定计划、仅重采样附件 3 预报误差（整日标准化误差块，保留日内相关与左尾）；"
-                "计划费固定，分布差异来自紧急购电；图 figures/Q2_总费用分布.pdf。"
+                "固定计划、离线重采样附件 3 同月整日原始残差块（预报−实际，保留日内相关）；"
+                "计划费固定，分布差异来自紧急购电；此分布只作事后风险评价，不参与在线决策；"
+                "图 figures/Q2_总费用分布.pdf。"
             ),
         )
         pm.save_outputs(
@@ -669,7 +694,9 @@ def run_q2(n_mc: int = 100, seed: int = 42, hedge: bool = True) -> dict:
                     "期望费用下降/%": float(100 * (total.mean() - total_h.mean()) / total.mean()),
                     "P95 下降/元": float(p95 - p95h),
                 },
-                note="对冲计划 = 两阶段场景 LP（每日 20 个误差情景）最小化期望总费用；两套计划用同一种子评估。",
+                note=("对冲计划 = 两阶段场景 LP（每日 20 个等概率原始残差情景）最小化期望总费用；"
+                      "目标日场景只取此前 90 日、同月样本不少于 14 日时优先同月；"
+                      "两套计划用同一种子作离线评估。"),
             )
             pm.save_outputs(
                 pd.DataFrame({"朴素_总费用_元": total, "对冲_总费用_元": total_h,
@@ -695,4 +722,13 @@ def run_q2(n_mc: int = 100, seed: int = 42, hedge: bool = True) -> dict:
 
 
 if __name__ == "__main__":
-    run_q2()
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--mc", type=int, default=100, help="蒙特卡洛年数；0 表示跳过")
+    ap.add_argument("--no-hedge", action="store_true", help="跳过两阶段场景对冲")
+    ap.add_argument("--write-result2-d", action="store_true",
+                    help="把口径 D 对照写为 result2_D_backup.xlsx（不覆盖正式 result2）")
+    args = ap.parse_args()
+    run_q2(n_mc=args.mc, hedge=not args.no_hedge,
+           write_result2_file=args.write_result2_d)

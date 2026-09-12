@@ -18,6 +18,7 @@ import pandas as pd
 
 import program as pm
 from solve import q2
+from solve import q3_proto as qp
 from solve.common import DATA_C, E0, ROOT, T
 
 DAY_START = q2.REPORT_START      # 31
@@ -48,10 +49,10 @@ def run_year(p4, p_typ, data, v, days):
     emerg_kwh = 0.0
     for D in range(N_DAY):
         p_hat = forecast_price(D, v, p4, p_typ) if D >= 7 else p4[D]
-        load_kwh = load[D] / 6.0
+        load_kwh = qp.hist_load_forecast(data, D) / 6.0
         pv_fc = q2._hour_to_slots(fc0[D]) / 6.0
         x, _E_plan, _ = q2.plan_day(p_hat, load_kwh, pv_fc, E, eps=1e-3)
-        ex = q2.exec_day_causal(p4[D], load_kwh, pv_act[D] / 6.0, x, E)
+        ex = q2.exec_day_causal(p4[D], data["load"][D] / 6.0, pv_act[D] / 6.0, x, E)
         E = float(ex["E"][-1])
         if D >= DAY_START:
             tot_cost += float(p4[D] @ x + q2.EMERG_MULT * (p4[D] @ ex["e"]))
@@ -61,7 +62,7 @@ def run_year(p4, p_typ, data, v, days):
 
 def main():
     pm.init(seed=42, root=str(ROOT))
-    data = q2.load_all()
+    data = qp.load_extended()
     p_typ = data["price"]  # 附件 1 = 逐槽均值
     df4 = pm.read_table(DATA_C / "附件4.xlsx")
     p4 = df4.iloc[:, 1:145].to_numpy(float)
@@ -92,10 +93,12 @@ def main():
     for D in range(N_DAY):
         for j, v in enumerate(grid):
             p_hat = forecast_price(D, v, p4, p_typ) if D >= 7 else p4[D]
-            load_kwh = data["load"][D] / 6.0
+            load_kwh = qp.hist_load_forecast(data, D) / 6.0
             pv_fc = q2._hour_to_slots(data["fc0"][D]) / 6.0
             x, _E_plan, _ = q2.plan_day(p_hat, load_kwh, pv_fc, E_state[j], eps=1e-3)
-            ex = q2.exec_day_causal(p4[D], load_kwh, data["pv_act"][D] / 6.0, x, E_state[j])
+            ex = q2.exec_day_causal(
+                p4[D], data["load"][D] / 6.0, data["pv_act"][D] / 6.0, x, E_state[j]
+            )
             E_state[j] = float(ex["E"][-1])
             daily_costs[D, j] = float(p4[D] @ x + q2.EMERG_MULT * (p4[D] @ ex["e"]))
         if (D + 1) % 60 == 0:
@@ -114,7 +117,8 @@ def main():
     picks = []
     for D in days:
         i0 = max(DAY_START, D - 7)
-        j = int(np.argmin(daily_costs[i0:D].mean(axis=0)))
+        j = (idx[(0.0, 0.0, 1.0)] if i0 == D
+             else int(np.argmin(daily_costs[i0:D].mean(axis=0))))
         roll += daily_costs[D, j]
         picks.append(grid[j])
     print(f"滚动 W=7 总费用 {roll / 1e4:.1f} 万元，平均权重 "
@@ -126,7 +130,8 @@ def main():
     pe = []
     for D in days:
         i0 = max(DAY_START, D - 7)
-        j = int(np.argmin(daily_mae[i0:D].mean(axis=0)))
+        j = (idx[(0.0, 0.0, 1.0)] if i0 == D
+             else int(np.argmin(daily_mae[i0:D].mean(axis=0))))
         roll_e += daily_costs[D, j]
         pe.append(grid[j])
     print(f"滚动 W=7（误差标定）总费用 {roll_e / 1e4:.1f} 万元，平均权重 "

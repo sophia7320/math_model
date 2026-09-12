@@ -64,7 +64,9 @@ def load_extended() -> dict:
 
     a1 = pm.read_table(DATA_C / "附件1.xlsx")
     pv_col = "光伏发电预测功率" if "光伏发电预测功率" in a1.columns else a1.columns[3]
+    load_col = "小区负载" if "小区负载" in a1.columns else a1.columns[2]
     data["pv_typ"] = a1[pv_col].to_numpy(float)
+    data["load_typ"] = a1[load_col].to_numpy(float)
 
     cache_dir = ROOT / "code" / "outputs" / "cache" / "q2e"
     files = sorted(cache_dir.glob("table_*.npz"),
@@ -101,6 +103,19 @@ def hist_forecast(data: dict, D: int) -> np.ndarray:
         u = _softmax(data["TH"][D - 1, 3:6])
     pv, typ = data["pv_act"], data["pv_typ"]
     return np.clip(u[0] * pv[D - 1] + u[1] * pv[D - 2] + u[2] * typ, 0.0, None)
+
+
+def hist_load_forecast(data: dict, D: int) -> np.ndarray:
+    """只用历史实际值预测目标日负荷（144 槽，kW）。
+
+    采用 Q2E 的同星期日/两周前/典型日三源权重；权重由 ``D-1`` 及更早的
+    已实现费用标定。附件 2 的目标日实际负荷只在执行回放时使用。
+    """
+    j = max(D - 1, 13)
+    w = _softmax(data["TH"][j, :3])
+    load, typ = data["load"], data["load_typ"]
+    d7, d14 = max(0, D - 7), max(0, D - 14)
+    return np.clip(w[0] * load[d7] + w[1] * load[d14] + w[2] * typ, 0.0, None)
 
 
 def make_smooth_u(data: dict, beta: float) -> np.ndarray:
@@ -221,13 +236,14 @@ def simulate_day(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
     """
     price = data["price"]
     load_kwh = data["load"][D] / 6.0
+    load_fc_kwh = hist_load_forecast(data, D) / 6.0
     pv_act_kwh = data["pv_act"][D] / 6.0
 
     f0 = q2._hour_to_slots(data["fc0"][D])
     ph = hist_forecast(data, D)
     pv_plan = (lam * f0 + (1.0 - lam) * ph) / 6.0
 
-    x_plan, E_plan, _ = q2.plan_day(price, load_kwh, pv_plan, E0, eps=EPS_TH)
+    x_plan, E_plan, _ = q2.plan_day(price, load_fc_kwh, pv_plan, E0, eps=EPS_TH)
 
     x_final = x_plan.copy()
     x_hist = {0: x_plan.copy()}
@@ -241,7 +257,9 @@ def simulate_day(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
         else:
             src = f0
         pv_new = np.clip(src, 0.0, None) / 6.0
-        x_adj, _E_adj = adjust_day(price, load_kwh, pv_new, x_plan, float(E_plan[t0 - 1]), t0)
+        x_adj, _E_adj = adjust_day(
+            price, load_fc_kwh, pv_new, x_plan, float(E_plan[t0 - 1]), t0
+        )
         x_final[t0:] = x_adj
         x_hist[pub] = x_final.copy()
 
@@ -342,6 +360,7 @@ def simulate_day_rt(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
     """
     price = data["price"]
     load_kwh = data["load"][D] / 6.0
+    load_fc_kwh = hist_load_forecast(data, D) / 6.0
     pv_act_kwh = data["pv_act"][D] / 6.0
 
     f0 = q2._hour_to_slots(data["fc0"][D])
@@ -350,7 +369,7 @@ def simulate_day_rt(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
     if margin:
         pv_plan = pv_plan * (1.0 - margin)      # 光伏预测保守打折（多买保险）
 
-    x_plan, E_plan, _ = q2.plan_day(price, load_kwh, pv_plan, E0, eps=EPS_TH)
+    x_plan, E_plan, _ = q2.plan_day(price, load_fc_kwh, pv_plan, E0, eps=EPS_TH)
 
     x_seq = x_plan.copy()
     E_target = E_plan.copy()
@@ -381,7 +400,7 @@ def simulate_day_rt(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
             else:
                 src = f0
             pv_new = np.clip(src, 0.0, None) / 6.0
-            x_adj, E_adj = adjust_day(price, load_kwh, pv_new, x_plan, E_now, t1)
+            x_adj, E_adj = adjust_day(price, load_fc_kwh, pv_new, x_plan, E_now, t1)
             x_seq[t1:] = x_adj
             E_target[t1:] = E_adj
             x_hist[pub] = x_seq.copy()
@@ -433,9 +452,23 @@ def latest_forecast(data: dict, D: int) -> np.ndarray:
     return v
 
 
-def forecast_residual(data: dict, D: int, adj_lam: float | None) -> np.ndarray:
-    """按当日实际预报口径返回"预报 − 实际"残差（kWh/槽；正 = 高估）。"""
-    official = latest_forecast(data, D)
+def forecast_at_publish(data: dict, D: int, publish: int) -> np.ndarray:
+    """返回历史日 ``D`` 在指定发布时刻可得到的整条当日预报（144 槽，kW）。
+
+    场景残差必须与当前决策的信息集一致。例如 6:00 调整只能使用历史 6:00
+    发布预报的误差，不能把历史 12:00/18:00 的更新拼接进剩余时段。
+    """
+    if publish == 0:
+        return q2._hour_to_slots(data["fc0"][D])
+    if publish not in (6, 12, 18):
+        raise ValueError(f"不支持的预报发布时刻：{publish}")
+    return fc_slots(data[f"fc{publish}"][D], publish)
+
+
+def forecast_residual(data: dict, D: int, publish: int,
+                      adj_lam: float | None) -> np.ndarray:
+    """指定发布时刻的“预报 − 实际”残差（kWh/槽；正 = 高估）。"""
+    official = forecast_at_publish(data, D, publish)
     if adj_lam is None:
         forecast = official
     else:
@@ -554,6 +587,7 @@ def simulate_day_rt_hedge(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
     """
     price = data["price"]
     load_kwh = data["load"][D] / 6.0
+    load_fc_kwh = hist_load_forecast(data, D) / 6.0
     pv_act_kwh = data["pv_act"][D] / 6.0
 
     f0 = q2._hour_to_slots(data["fc0"][D])
@@ -561,7 +595,7 @@ def simulate_day_rt_hedge(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
     pv_plan = (lam * f0 + (1.0 - lam) * ph) / 6.0
     if margin:
         pv_plan = pv_plan * (1.0 - margin)
-    x_plan, E_plan, _ = q2.plan_day(price, load_kwh, pv_plan, E0, eps=EPS_TH)
+    x_plan, E_plan, _ = q2.plan_day(price, load_fc_kwh, pv_plan, E0, eps=EPS_TH)
 
     x_seq = x_plan.copy()
     E_target = E_plan.copy()
@@ -597,14 +631,20 @@ def simulate_day_rt_hedge(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
                 scenario_days.extend(int(ix) for ix in idxs)
                 scens = [pv_nom_full[t1:]] + [
                     np.clip(
-                        pv_nom_full[t1:] - forecast_residual(data, int(ix), adj_lam)[t1:],
+                        pv_nom_full[t1:] - forecast_residual(
+                            data, int(ix), pub, adj_lam
+                        )[t1:],
                         0.0, None,
                     )
                     for ix in idxs
                 ]
-                x_adj, E_adj = adjust_day_hedge(price, load_kwh, scens, x_plan, E_now, t1)
+                x_adj, E_adj = adjust_day_hedge(
+                    price, load_fc_kwh, scens, x_plan, E_now, t1
+                )
             else:
-                x_adj, E_adj = adjust_day(price, load_kwh, pv_nom_full, x_plan, E_now, t1)
+                x_adj, E_adj = adjust_day(
+                    price, load_fc_kwh, pv_nom_full, x_plan, E_now, t1
+                )
             x_seq[t1:] = x_adj
             E_target[t1:] = E_adj
             x_hist[pub] = x_seq.copy()

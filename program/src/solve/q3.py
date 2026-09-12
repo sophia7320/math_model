@@ -31,7 +31,7 @@ from solve.common import DATA_C, RESULTS_DIR, ROOT, T
 LAM = 0.7           # 0:00 组合权重（官方占比）
 ADJ_LAM = 0.7       # 调整层组合权重
 BETA = 0.1          # 历史权重平滑系数
-N_SCEN = 10         # 对冲情景数
+N_SCEN = 40         # 对冲情景数；3 种子收敛检查后由 10 升级为 40
 SEED = 7
 DAY_START = q2.REPORT_START      # 31（2025-02-01）
 N_Q3 = q2.N_DAY - DAY_START      # 334
@@ -258,9 +258,10 @@ def main():
             **chk,
         },
         note=(
-            "主方案：0:00 计划用组合预测（λ=0.7·官方f0 + 0.3·历史口E，历史权重参数平滑 β=0.1）；"
+            "主方案：负荷使用目标日前历史预测；0:00 光伏用组合预测"
+            "（λ=0.7·官方f0 + 0.3·历史口E，历史权重参数平滑 β=0.1）；"
             "6/12/18 点用同组合口径的最新预报调整；6:00/12:00 叠加无前视场景对冲"
-            "（残差块仅取自目标日之前，10 情景）；逐槽因果执行（q2.exec_segment_causal，"
+            f"（残差块仅取自目标日之前，{N_SCEN} 情景）；逐槽因果执行（q2.exec_segment_causal，"
             "不读取未来实际值），缺口 5 倍紧急。结算 = Σ[p·x_adj + 0.5p|x_plan−x_adj|] + 5Σp·e。"
             "result3.xlsx 已生成并回读校验；图 figures/Q3_策略费用对比.pdf、Q3_逐日紧急购电.pdf、"
             "Q3_调整量分布.pdf；逐日表 code/outputs/q3_daily.csv。"

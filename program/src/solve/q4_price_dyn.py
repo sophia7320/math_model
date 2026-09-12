@@ -16,6 +16,7 @@ import pandas as pd
 
 import program as pm
 from solve import q2
+from solve import q3_proto as qp
 from solve.common import DATA_C, E0, ROOT, T
 
 DAY_START = q2.REPORT_START
@@ -34,7 +35,7 @@ def run_year_vseq(p4, p_typ, data, v_seq):
     for D in range(N_DAY):
         v = v_seq.get(D, (0.0, 0.0, 1.0))
         p_hat = forecast_price(D, v, p4, p_typ) if D >= 7 else p_typ
-        x, _E_plan, _ = q2.plan_day(p_hat, load[D] / 6.0,
+        x, _E_plan, _ = q2.plan_day(p_hat, qp.hist_load_forecast(data, D) / 6.0,
                                     q2._hour_to_slots(fc0[D]) / 6.0, E, eps=1e-3)
         ex = q2.exec_day_causal(p4[D], load[D] / 6.0, pv_act[D] / 6.0, x, E)
         E = float(ex["E"][-1])
@@ -45,7 +46,7 @@ def run_year_vseq(p4, p_typ, data, v_seq):
 
 def main():
     pm.init(seed=42, root=str(ROOT))
-    data = q2.load_all()
+    data = qp.load_extended()
     p_typ = data["price"]
     df4 = pm.read_table(DATA_C / "附件4.xlsx")
     p4 = df4.iloc[:, 1:145].to_numpy(float)
