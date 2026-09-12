@@ -36,7 +36,7 @@ EPS_THROUGHPUT = 1e-3   # 执行 LP：抑制无意义充放的小罚项（元/kW
 EMERG_MULT = 5.0        # 紧急购电价倍数
 REPORT_START = 31       # 2025-02-01 的日序号（0 基）
 N_DAY = 365
-CAUSAL_POLICY_VERSION = "greedy-reachable-v1"   # 因果执行策略版本（参与缓存键）
+CAUSAL_POLICY_VERSION = "free-no-terminal-v1"   # 因果执行策略版本（参与缓存键）
 
 
 # ---- 预报误差模型（相对 (时刻,月) 期望出力；见 C题_预报误差分析.md）----

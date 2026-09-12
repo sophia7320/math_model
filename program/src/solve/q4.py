@@ -137,7 +137,8 @@ def run_year(data, p4, p_typ, vseq, price_mode="H", storage="2day",
     """
     load, pv_act = data["load"], data["pv_act"]
     E = E0
-    recs: list[dict] = []
+    # 按日序号对齐（D < start 的月份仅作预测预热，占位记录不计费）
+    recs: list[dict] = [{"D": D} for D in range(N_DAY)]
     for D in range(start, end):
         if price_mode == "G":
             p_d = p4[D]
@@ -151,20 +152,18 @@ def run_year(data, p4, p_typ, vseq, price_mode="H", storage="2day",
         pv_fc_d = cs.margin_pv(qp.hist_forecast_asof(data, D, D)) / 6.0
 
         if storage == "daily":
-            x_day, E_plan, _ = q2.plan_day(p_d, load_fc_d, pv_fc_d, E, eps=EPS_PLAN)
-            e_end = float(np.clip(E_plan[-1], E_MIN, E_MAX))
+            x_day, _E_plan, _ = q2.plan_day(p_d, load_fc_d, pv_fc_d, E, eps=EPS_PLAN)
         else:
             D1 = min(D + 1, N_DAY - 1)
             load_fc_d1 = cs.kappa_load(qp.hist_load_forecast_asof(data, D + 1, D)) / 6.0
             pv_fc_d1 = cs.margin_pv(qp.hist_forecast_asof(data, D + 1, D)) / 6.0
-            xh, Eh = plan_horizon(
+            xh, _Eh = plan_horizon(
                 np.concatenate([p_d, p_d1]),
                 np.concatenate([load_fc_d, load_fc_d1]),
                 np.concatenate([pv_fc_d, pv_fc_d1]),
                 E, None,
             )
             x_day = xh[:T]
-            e_end = float(np.clip(Eh[T - 1], E_MIN, E_MAX))
 
         # 统一执行策略（free）：无段末硬目标
         ex = q2.exec_segment_causal(load_act, pv_act[D] / 6.0, x_day, E, None)
@@ -174,7 +173,7 @@ def run_year(data, p4, p_typ, vseq, price_mode="H", storage="2day",
             rec["plan_cost"] = float(p4[D] @ x_day)
             rec["emerg"] = float(q2.EMERG_MULT * (p4[D] @ ex["e"]))
             rec["total"] = rec["plan_cost"] + rec["emerg"]
-        recs.append(rec)
+        recs[D] = rec
         E = float(ex["E"][-1])
     return recs
 
@@ -497,7 +496,7 @@ def run_year_q3(data, p4, p_typ, vseq, price_mode="H", storage="daily",
                 adj_hours=(6, 12, 18), hedge=True, n_scen=cs.N_SCEN, seed=7,
                 lam=0.7, adj_lam=0.7) -> list[dict]:
     E = E0
-    recs = []
+    recs: list[dict] = [{"D": D} for D in range(N_DAY)]  # 按日序号对齐
     for D in range(REPORT_START, N_DAY):
         r = simulate_day_q3(
             data, p4, p_typ, vseq, D, price_mode=price_mode, storage=storage,
@@ -505,7 +504,7 @@ def run_year_q3(data, p4, p_typ, vseq, price_mode="H", storage="daily",
             lam=lam, adj_lam=adj_lam,
             e_start=(E0 if storage == "daily" else E),
         )
-        recs.append(r)
+        recs[D] = r
         E = r["E_end"] if storage == "2day" else E0
     return recs
 
