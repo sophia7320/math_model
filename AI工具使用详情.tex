@@ -1,0 +1,89 @@
+% !TeX program = xelatex
+% CUMCM 2026 C 题《AI 工具使用详情》——据实填写，提交前导出 PDF
+\documentclass[a4paper,11pt]{ctexart}
+\usepackage[margin=25mm]{geometry}
+\usepackage{booktabs,tabularx,array,longtable,enumitem,hyperref}
+\hypersetup{hidelinks}
+\setlength{\parindent}{2em}
+\renewcommand{\arraystretch}{1.35}
+\title{AI 工具使用详情}
+\author{CUMCM 2026 参赛队（C 题：微网与外部电网电力调控策略）}
+\date{2026 年 9 月}
+\begin{document}
+\maketitle
+
+\section*{一、工具名称和版本}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{0.20\textwidth} p{0.24\textwidth} p{0.16\textwidth} X}
+\toprule
+工具名称 & 版本／型号 & 开发机构 & 使用日期与环节 \\
+\midrule
+OpenCode（AI 编程智能体） & OpenCode 1.18.30；调用模型：DeepSeek V4 Flash & OpenCode 开源生态；模型由 DeepSeek 提供 & 2026-09-09 至 2026-09-13：建模辅助、程序编写、数值实验、图表绘制、论文生成与验证 \\
+ChatGPT & GPT-5.6 Thinking & OpenAI & 2026-08-03 起：论文 LaTeX 排版与格式规范；2026-09：求解结果的独立平行审计与稳健性对照 \\
+\bottomrule
+\end{tabularx}
+
+\section*{二、具体使用目的和环节}
+本队对 AI 的定位是\textbf{辅助工具}：AI 用于辅助建模思考、方案评估与比较、快速代码编写与数值
+实验、图表生成以及文字组织与排版；\textbf{核心建模思路、模型选型、参数取舍、结果核验与最终
+提交由参赛队主导决定，人的核心定位未转移}。AI 承担了约 6000 行求解与实验程序的编写，本队
+认为这是\textbf{善用 AI 提效}的体现：人力从重复编码中释放，集中用于建模方向判断、参数决策
+与结果把关。作为质量控制，\textbf{关键算法代码已由参赛队逐行复核}，覆盖：计划/执行 LP 与
+逐槽因果执行器、Q2 费用标定与 EWMA 权重及裕度修正、Q3 三层结算与无前视场景对冲、Q4 滚动
+重算与结果勾稽；机器侧以回归测试与结构审计复核（\texttt{tests/solve\_causal\_test.py}、
+\texttt{tests/c\_results\_audit.py}），两者互为补充。具体环节如下：
+
+\begin{enumerate}[leftmargin=2.5em,itemsep=2pt]
+\item \textbf{建模思考与方案评估}：AI 提供备选建模路径及优缺点对照（如问题二预测目标的选择、
+问题三调整机制的取舍、问题四电价信息口径 H/G 的对比），供参赛队评估后决策；
+\item \textbf{模型设计与公式整理}：将参赛队确定的建模思路整理为规范公式、约束与算法流程
+（组合预测、按下游费用标定的权重、分位数裕度修正、三层结算 LP、跨日滚动结构等），并逐项复核；
+\item \textbf{程序编写与数值实验}：快速编写全部求解与实验程序（\texttt{program/src/solve/}，
+约 6000 行），批量执行参数搜索、灵敏度分析、蒙特卡洛与对照实验，生成对照表供参赛队比较与取舍；
+\item \textbf{图表生成}：由结果数据生成论文级矢量图（PDF），绘制技术路线图与模型流程图；
+\item \textbf{论文写作与排版}：按 CUMCM 模板生成 LaTeX 工程，排查并修复 XeLaTeX 编译问题，
+核对 2026 年论文格式规范，进行文字组织与版式优化（ChatGPT 排版线）；
+\item \textbf{验证与审计}：执行五份结果文件结构审计、写作门禁检查与无前视审计；并由 ChatGPT
+对 Q2/Q3/Q4 的求解结果做独立平行复算与稳健性对照（如窗口长度、情景数、组合权重），用于交叉验证。
+\end{enumerate}
+
+\section*{三、关键交互记录}
+\begin{longtable}{>{\centering\arraybackslash}p{0.05\textwidth}p{0.38\textwidth}p{0.47\textwidth}}
+\toprule
+序号 & 重要提示词／请求 & AI 输出与采纳、修改情况 \\
+\midrule
+\endfirsthead
+\toprule
+序号 & 重要提示词／请求 & AI 输出与采纳、修改情况 \\
+\midrule
+\endhead
+1 & “把论文按照模板转换为 LaTeX”“编译有问题”（ChatGPT，2026-08） & 将论文转换为基于 \texttt{cumcmthesis} 的 LaTeX 工程，修复 XeLaTeX 编译问题，按官方规范调整版式。\textbf{采纳}，版式由参赛队人工核对。 \\
+2 & 对已完成的求解程序做执行层独立审计（ChatGPT 平行验证，2026-09） & 指出“全天事后 LP 存在前视，会系统性低估紧急购电”，与参赛队共同核查后改为逐槽因果执行，全部正式数字重算。\textbf{采纳}（因果口径成为正式口径）。 \\
+3 & “第二问的模型还有优化空间，参考值应该分析数据分布结构得出”（OpenCode，2026-09） & 完成预测误差分布结构分析与参数搜索：EWMA 半衰期 5 天 + 负荷抬升 1.02 + 光伏折扣 50 kW，全年费用 1406.6 万元（较原口径 $-4.14\%$）。\textbf{采纳}，更新官方 result2.xlsx。 \\
+4 & 提出“回归参考量 + 回归参数动态调节”的改进设想（OpenCode，2026-09） & 实现两组方案并做全年对照：纯替换方案变差（1518$\sim$1522 万元）；混合方案仅再省 3.4 万元。参赛队评估后\textbf{暂缓采用}，原因与数据留档。 \\
+5 & “全部执行，给我最后的成品”（OpenCode，2026-09） & 生成五份官方结果文件、全部图表、论文与验收报告。\textbf{采纳}，参赛队逐项验收（结果结构审计、写作门禁、数值一致性）。 \\
+6 & 要求对五份官方结果文件做统一审计（OpenCode，2026-09） & 生成结构审计脚本（sheet 名、行数、数值非负、勾稽关系、储能边界），一次运行全部通过。\textbf{采纳}为提交前固定检查。 \\
+7 & 问题三“是否需要引入其他时刻预报”的定量回答（OpenCode + ChatGPT 双向对照） & 调整时刻消融与灵敏度分析：情景数、场景池窗口、组合权重的影响均在 0.6\% 以内，前视违规 0 天。\textbf{采纳}入论文灵敏度小节。 \\
+8 & AI 使用披露与合规检查（OpenCode，2026-09） & 依据官方要求与模板核对表，逐项整理本文档并核对论文中的 AI 标注。\textbf{采纳}。 \\
+\bottomrule
+\end{longtable}
+
+\section*{四、采纳和人工修改情况}
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+\item \textbf{完全采纳}：因果执行修正（消除前视，影响全部正式数字）、问题二调优配置、
+五份结果文件结构审计脚本、问题三灵敏度分析、论文排版与格式规范；
+\item \textbf{部分采纳（经人工修改）}：AI 输出的公式推导、文字草稿与图表均经参赛队复核修改，
+包括摘要精简、数值换算与口径统一（3 处）、图表命名与说明、参考文献逐条核实；
+\item \textbf{未采纳／暂缓}：回归参考量方案（净收益约 0.24\%）、预测层缩放/校准类修饰
+（经费模型吸收、费用不变）、深度学习第三预测源（单年数据下季节风险大）——均留有实验记录；
+\item \textbf{关键算法代码逐行复核}：核心模块（LP 约束与储能边界、费用与结算口径、无前视
+逻辑、场景池采样、结果文件勾稽）由参赛队逐行阅读复核，并配合回归测试与五份结果文件审计，
+完成人工与机器的双重把关；
+\item \textbf{参赛队负责}：赛题理解、建模主线与信息口径选择、参数与方案拍板、结果核验、
+论文定稿与提交。全部数值结果由固定随机种子的程序重新生成并逐项校验。
+\end{itemize}
+
+\section*{五、完整性声明}
+本文件覆盖本队可核查的 AI 使用记录（截至 2026-09-13），与论文正文的 [AI] 标注及支撑材料
+一一对应；工具与版本以使用当时为准。如提交前另有补充使用，将更新本文件并重新导出 PDF。
+
+\end{document}

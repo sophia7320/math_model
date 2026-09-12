@@ -163,6 +163,54 @@ def plan_day(price, load_kwh, pv_kwh, e_start, eps=0.0):
     return res.x[0:T], res.x[4 * T:5 * T], res
 
 
+def plan_horizon(price_h, load_h, pv_h, e_start, e_terminal=None, eps=0.0):
+    """多日计划 LP（H 个 10 分钟槽）：min Σp·x + eps·Σ(c+d)。
+
+    E(0)=e_start；末端自由（``e_terminal=None``，滚动 MPC 口径）或锚定
+    E(H-1)=e_terminal。SOC 界 [E_MIN, E_MAX]、充放功率上限、允许弃光
+    （s ≤ 预测光伏）、不允许售电。变量块：0=x 购电 1=c 充电 2=d 放电 3=s 弃光 4=E。
+    返回 (x, E, res)。
+    """
+    H = len(price_h)
+    n = 5 * H
+    c_obj = np.zeros(n)
+    c_obj[0:H] = price_h
+    c_obj[H:3 * H] = eps
+
+    n_rows = 2 * H + (1 if e_terminal is not None else 0)
+    A_eq = lil_matrix((n_rows, n))
+    b_eq = np.zeros(n_rows)
+    for t in range(H):
+        A_eq[t, 0 * H + t] = 1.0
+        A_eq[t, 1 * H + t] = -1.0
+        A_eq[t, 2 * H + t] = 1.0
+        A_eq[t, 3 * H + t] = -1.0
+        b_eq[t] = load_h[t] - pv_h[t]
+    for t in range(H):
+        r = H + t
+        A_eq[r, 4 * H + t] = 1.0
+        if t:
+            A_eq[r, 4 * H + t - 1] = -1.0
+        A_eq[r, 1 * H + t] = -ETA
+        A_eq[r, 2 * H + t] = 1.0 / ETA
+        b_eq[r] = e_start if t == 0 else 0.0
+    if e_terminal is not None:
+        A_eq[2 * H, 4 * H + H - 1] = 1.0
+        b_eq[2 * H] = float(e_terminal)
+
+    bounds = (
+        [(0.0, None)] * H
+        + [(0.0, P_MAX_E)] * H
+        + [(0.0, P_MAX_E)] * H
+        + [(0.0, float(v)) for v in pv_h]
+        + [(E_MIN, E_MAX)] * H
+    )
+    res = pm.optimize.solve_lp(c_obj, A_eq=csr_matrix(A_eq), b_eq=b_eq, bounds=bounds)
+    if not res.success:
+        raise RuntimeError(f"多日计划 LP 失败：{res.message}")
+    return res.x[0:H], res.x[4 * H:5 * H], res
+
+
 def exec_day(price, load_kwh, pv_kwh, x_plan, e_start):
     """事后执行下界：x 已承诺，使用全天实际曲线重优化储能。
 

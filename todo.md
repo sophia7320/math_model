@@ -29,7 +29,10 @@
 
 ## 待完成
 
-- [ ] （提交前）填写 `数学建模模板/support_materials/AI工具使用详情` 并生成 PDF、按需打包支撑材料
+- [ ] （提交前）**《AI工具使用详情》**：草稿已完成（`AI工具使用详情.tex` + `.pdf`，3 页）——
+  **待参赛队确认工具日期并审校**；论文正文已补 11 处 `[AI]` 标注、说明节与参考文献已更新
+- [ ] （提交前）支撑材料打包（src/ data/ results/ figures/ reports/ README.txt + AI详情 PDF），
+  与论文附录 B 列表逐项一致
 - [ ] 最终提交检查：`uv run python tests/c_results_audit.py` + `tests/solve_causal_test.py` +
   论文与根目录副本一致性（`paper/main.pdf` ↔ `论文_CUMCM2026_C题.pdf`）
 
