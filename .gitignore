@@ -17,9 +17,6 @@ code/outputs/cache/
 *.ckpt
 *.onnx
 
-# ---- 嵌套仓库：program/ 有独立 git（单独提交）----
-program/
-
 # ---- OpenCode（node_modules 与 skills Junction 不入库）----
 .opencode/node_modules/
 .opencode/skills/

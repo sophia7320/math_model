@@ -1,0 +1,63 @@
+site_name: program · 数学建模工具包
+site_description: CUMCM / 华为杯 / MCM 通用 Python 便利库使用手册
+docs_dir: docs
+site_dir: site
+use_directory_urls: false
+copyright: 数学建模工作区自建工具库 · 使用手册
+
+theme:
+  name: material
+  language: zh
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - search.highlight
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/weather-night
+        name: 切换到深色
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: 切换到浅色
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+exclude_docs: |
+  generate_assets.py
+
+nav:
+  - 首页: index.md
+  - 快速开始: getting-started.md
+  - 模块手册:
+      - 数据读写 dataio: modules/dataio.md
+      - 论文绘图 plotting: modules/plotting.md
+      - 统计 · 拟合 · 评估: modules/stats-fitting.md
+      - 优化求解 optimize: modules/optimize.md
+      - 机器学习 ml: modules/ml.md
+      - 微分方程 ode: modules/ode.md
+      - 报告与工具: modules/report-utils.md
+  - 实战食谱: cookbook.md
+  - 常见问题: faq.md

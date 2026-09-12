@@ -51,7 +51,7 @@ uv run python tests/solve_causal_test.py      # 因果执行 + 无前视残差�
 ```text
 math_model/
 ├─ CUMCM2026Problems/          赛题原文与附件（A~E 题，当前用 C 题）
-├─ program/                    代码工程（uv 项目，独立 git 仓库）
+├─ program/                    代码工程（uv 项目，随根仓库统一管理）
 │  ├─ src/program/             工具箱（import program as pm；11 模块、100+ 函数）
 │  ├─ src/solve/               C 题求解（q1 / q2 / q2_adaptive / q2_arima / q3 / q4_price_* + 算法与设计文档）
 │  ├─ data/C/                  附件 1~5（数据与官方结果模板）
