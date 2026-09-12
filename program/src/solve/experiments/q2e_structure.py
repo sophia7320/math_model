@@ -11,7 +11,7 @@
 
 输出：code/outputs/q2e_structure_{slots,hours,months}.csv、q2e_structure_summary.json
 图：figures/Q2E_误差结构与参考值.pdf
-运行（在 program/ 下）：uv run python -m solve.q2e_structure
+运行（在 program/ 下）：uv run python -m solve.experiments.q2e_structure
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ import program as pm
 from solve import q2
 from solve.common import ROOT
 from solve.io.report import record
-from solve.q2_adaptive import AdaptiveWeightModel
+from solve.models.adaptive import AdaptiveWeightModel
 
 
 def acf(x: np.ndarray, max_lag: int) -> np.ndarray:

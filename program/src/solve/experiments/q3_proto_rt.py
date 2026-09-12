@@ -3,7 +3,7 @@
 实时执行 = 每段先用实际功率执行到下一调整时刻（得到真实储电量），调整 LP 以该
 储电量为初值（利用已实现信息），段执行终端跟踪最近一次规划轨迹。
 
-运行（program/ 下）：uv run python -m solve.q3_proto_rt
+运行（program/ 下）：uv run python -m solve.experiments.q3_proto_rt
 """
 from __future__ import annotations
 

@@ -3,7 +3,7 @@
 - 参数平滑：u_D = β·u_new + (1−β)·u_{D−1}（β=1 为不平滑）
 - 评估基座：实时执行 + 全开调整 + 调整层组合
 
-运行（program/ 下）：uv run python -m solve.q3_proto_smooth
+运行（program/ 下）：uv run python -m solve.experiments.q3_proto_smooth
 """
 from __future__ import annotations
 

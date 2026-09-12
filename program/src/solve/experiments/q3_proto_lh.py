@@ -1,6 +1,6 @@
 """Q3 原型第七批：对冲模式下组合权重扫描 + 调整点确认。
 
-运行（program/ 下）：uv run python -m solve.q3_proto_lh
+运行（program/ 下）：uv run python -m solve.experiments.q3_proto_lh
 """
 from __future__ import annotations
 

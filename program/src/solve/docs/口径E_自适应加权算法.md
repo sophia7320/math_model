@@ -1,7 +1,7 @@
 # 口径 E：历史自适应加权预测与滚动标定算法
 
 > 对应问题：CUMCM 2026 C 题「微网与外部电网电力调控」问题二（对照口径 E）
-> 代码：`program/src/solve/q2_adaptive.py`（类 `AdaptiveWeightModel`）
+> 代码：`program/src/solve/models/adaptive.py`（类 `AdaptiveWeightModel`；门面 `q2_adaptive.py` 再导出）
 > 结果：`reports/RESULTS_REPORT.md`「问题二 口径E …」章节；数据 `code/outputs/q2e_*.csv`；图 `figures/q2e_*.pdf`
 > 特点：**不使用附件 3 的预报**，仅用历史实际（附件 2）+ 附件 1 典型日
 >
@@ -84,9 +84,9 @@ P̂(D,t) = u1 · P(D-1,t)  + u2 · P(D-2,t)  + u3 · P̄(t)
 
 ## 5. 单日实际费用模型
 
-`day_cost(D, w, u)`（`q2_adaptive.py:162`）由两次 LP 构成。
+`day_cost(D, w, u)`（`models/adaptive.py:207`）由两次 LP 构成。
 
-### 5.1 计划 LP（0:00，按预测执行；`q2.py:123`）
+### 5.1 计划 LP（0:00，按预测执行；`core/lp.py:109`，门面 `q2.plan_day`）
 
 ```
 min  Σ_t p_t·x_t + ε·Σ_t (c_t + d_t)
@@ -97,7 +97,7 @@ s.t. P̂_t/6 + x_t + d_t = L̂_t/6 + c_t + s_t        （功率平衡，s_t 为�
      1200 ≤ E_t ≤ 10800
 ```
 
-### 5.2 执行 LP（实际揭晓后；`q2.py:164`）
+### 5.2 执行 LP（实际揭晓后；`core/lp.py:188`，门面 `q2.exec_day`）
 
 计划购电量 `x` 已承诺不可改；储能按实际负荷/光伏再调度，缺口用紧急购电补齐：
 
@@ -284,15 +284,15 @@ uv run python -m solve.q2_adaptive --result2
 
 | 内容 | 位置 |
 | --- | --- |
-| 权重网格 / softmax | `q2_adaptive.py:49, :55` |
-| 预测模型 | `q2_adaptive.py:154` |
-| 单日费用（计划 + 执行 + 紧急） | `q2_adaptive.py:162`；LP 见 `q2.py:123, :164` |
-| 窗口目标 / Adam 精化 | `q2_adaptive.py:169, :177, :182` |
-| 成本表（含精化）与缓存 | `q2_adaptive.py:204, :225, :233` |
-| 权重选择 / 事后最优 | `q2_adaptive.py:267, :282` |
-| 全年模拟 | `q2_adaptive.py:297` |
-| 主流程（对照/图/报告） | `q2_adaptive.py:324` |
-| 窗口敏感性 | `q2_adaptive.py:459` |
+| 权重网格 / softmax | `models/weights.py:17, :23` |
+| 预测模型 | `models/adaptive.py:184, :198`（`forecast_kw` / `forecast`） |
+| 单日费用（计划 + 执行 + 紧急） | `models/adaptive.py:207`；LP 见 `core/lp.py:109, :188` |
+| 窗口目标 / Adam 精化 | `models/adaptive.py:228, :233` |
+| 成本表（含精化）与缓存 | `models/adaptive.py:256, :282, :299` |
+| 权重选择 / 事后最优 | `models/adaptive.py:336, :353` |
+| 全年模拟 | `models/adaptive.py:370` |
+| 主流程（对照/图/报告） | `models/adaptive.py:466` |
+| 窗口敏感性 | `models/adaptive.py:634` |
 
 复现命令（在 `program/` 目录下）：
 

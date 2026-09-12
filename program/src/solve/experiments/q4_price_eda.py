@@ -1,6 +1,6 @@
 """Q4 附件 4 波动电价结构分析（EDA）：日内/周内/年内结构、自相关、预测源可解释性。
 
-运行（program/ 下）：uv run python -m solve.q4_price_eda
+运行（program/ 下）：uv run python -m solve.experiments.q4_price_eda
 """
 from __future__ import annotations
 

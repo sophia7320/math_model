@@ -15,7 +15,7 @@ from solve import q1, q2, q3
 from solve import q3_proto as qp
 from solve.q2_adaptive import AdaptiveWeightModel, simplex_grid, softmax
 from solve.q4 import plan_horizon
-from solve.q4_price_dyn import forecast_price as fp_dyn
+from solve.experiments.q4_price_dyn import forecast_price as fp_dyn
 from solve.q4_price_fit import forecast_price as fp_fit
 
 # ---------------------------------------------------------------------------

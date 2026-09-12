@@ -5,7 +5,7 @@
 | 文件 | 类型 | 来源依据 | 用途 | 状态 |
 | --- | --- | --- | --- | --- |
 | `figures/技术路线图.drawio` / `.pdf` / `.png` / `.content.json` | 五带技术路线图（scibox-diagram 模板 `roadmap-5band`） | `reports/ANALYSIS_MODELING_REPORT.md`、`reports/RESULTS_REPORT.md` | 论文「问题分析/总体框架」节；一页概览四问递进与统一建模引擎 | ✅ 已导出 |
-| `figures/Q2改进模型_流程图.drawio` / `.pdf` / `.png` | 手写 XML 纵向流程图（scibox-diagram 路径 B） | `reports/Q2_参数与分布结构专题.md`、`solve/q2e_structure.py`/`q2_tune.py` | 第二问改进模型（EWMA 标定 + κ/m 裕度 + 因果执行）的公式级流程说明；可作论文 Q2 模型图 | ✅ 已导出 |
+| `figures/Q2改进模型_流程图.drawio` / `.pdf` / `.png` | 手写 XML 纵向流程图（scibox-diagram 路径 B） | `reports/Q2_参数与分布结构专题.md`、`solve/experiments/q2e_structure.py`/`q2_tune.py` | 第二问改进模型（EWMA 标定 + κ/m 裕度 + 因果执行）的公式级流程说明；可作论文 Q2 模型图 | ✅ 已导出 |
 
 ## 未生成图示及原因
 

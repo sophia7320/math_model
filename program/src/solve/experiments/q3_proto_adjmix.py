@@ -3,7 +3,7 @@
 发现：0:00 计划用组合预测（较准），调整层却用纯官方预报（较不准）→ 调整会把更准的
 计划改坏（实时模式下 λ=0.5 的"仅 6:00"反而比无调整贵）。本实验让调整层也用同一组合权重。
 
-运行（program/ 下）：uv run python -m solve.q3_proto_adjmix
+运行（program/ 下）：uv run python -m solve.experiments.q3_proto_adjmix
 """
 from __future__ import annotations
 

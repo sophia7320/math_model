@@ -6,7 +6,7 @@
 3. 用平滑后的连续 v 序列重新模拟全年（跨日连续储能），对比 334 天费用
 
 复用的公共实现：models/price.forecast_price（三源预测）、models/price.rolling_v_star（v* 选择）。
-运行（program/ 下）：uv run python -m solve.q4_price_dyn
+运行（program/ 下）：uv run python -m solve.experiments.q4_price_dyn
 """
 from __future__ import annotations
 

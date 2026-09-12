@@ -21,6 +21,9 @@ code/outputs/cache/
 .opencode/node_modules/
 .opencode/skills/
 
+# ---- CodeGraph 索引缓存（本地工具产物）----
+.codegraph/
+
 # ---- LaTeX 中间产物（全局忽略，保留 PDF）----
 *.aux
 *.out

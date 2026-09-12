@@ -1,6 +1,6 @@
 """Q3 原型第六批：保守裕度扫描 + 调整层场景对冲。
 
-运行（program/ 下）：uv run python -m solve.q3_proto_final
+运行（program/ 下）：uv run python -m solve.experiments.q3_proto_final
 """
 from __future__ import annotations
 

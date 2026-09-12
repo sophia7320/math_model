@@ -6,7 +6,7 @@ E1 三条路线（Q2 口径：0:00 计划 take-or-pay + 5 倍紧急）：
   对冲   两阶段场景 LP（q2.run_hedge）
 评估：确定性全年费用（2/1~12/31）+ 蒙特卡洛 50 年（共同随机数）。
 
-运行（program/ 下）：uv run python -m solve.q2_bias
+运行（program/ 下）：uv run python -m solve.experiments.q2_bias
 """
 from __future__ import annotations
 

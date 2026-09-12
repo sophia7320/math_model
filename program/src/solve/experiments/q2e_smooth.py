@@ -3,7 +3,7 @@
 平滑：权重_D = β·权重_new_D + (1−β)·权重_{D−1}（凸组合，负荷 w 与光伏 u 可分别控制）
 对比基准（因果口径）：W=7 网格（官方 result2，1467.4 万）、W=1+梯度（1515.4 万）。
 
-运行（program/ 下）：uv run python -m solve.q2e_smooth
+运行（program/ 下）：uv run python -m solve.experiments.q2e_smooth
 """
 from __future__ import annotations
 
@@ -15,7 +15,8 @@ import pandas as pd
 import program as pm
 from solve import q2
 from solve.common import ROOT
-from solve.q2_adaptive import AdaptiveWeightModel, softmax
+from solve.models.adaptive import AdaptiveWeightModel
+from solve.models.weights import softmax
 
 
 def smoothed_from_table(model, W, beta, smooth_load=True, smooth_pv=True):

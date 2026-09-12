@@ -90,7 +90,7 @@ cd paper && xelatex -interaction=nonstopmode main.tex && xelatex -interaction=no
 ## 本轮修复：q2e 缓存隔离
 
 `q3_proto.load_extended()` 原按文件 mtime 选 `cache/q2e/table_*.npz`，而 Q2 回归源
-实验（`q2_regsrc.py`）把 7 张变体表写进了同一目录，导致 Q3 灵敏度首次运行没有复现
+实验（`experiments/q2_regsrc.py`）把 7 张变体表写进了同一目录，导致 Q3 灵敏度首次运行没有复现
 正式结果（1332.2 vs 1327.8 万）。修复：
 
 - `AdaptiveWeightModel.build_table` 支持 `CACHE_TAG` 子目录并在 npz 中写入 `tag`；

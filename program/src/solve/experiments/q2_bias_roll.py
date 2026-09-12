@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Q2 偏差策略的滚动标定验证（无前视）：每天用过去 W 天选最优 δ。
 
-运行（program/ 下）：uv run python -m solve.q2_bias_roll
+运行（program/ 下）：uv run python -m solve.experiments.q2_bias_roll
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pandas as pd
 
 import program as pm
 from solve import q2
-from solve import q2_bias as qb
+from solve.experiments import q2_bias as qb
 from solve.common import ROOT
 
 DELTAS = [0, 50, 100, 150, 200, 250, 300, 350, 400, 500]

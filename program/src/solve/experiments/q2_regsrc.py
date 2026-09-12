@@ -11,8 +11,8 @@
   T2 滚动多元回归：4 个滞后为特征，最近 60 天同槽 OLS，逐日重估（无前视）。
 
 模式：
-  uv run python -m solve.q2_regsrc            # 探针：精度 + 固定权重费用
-  uv run python -m solve.q2_regsrc --full     # 全流程：甲（严格）/乙（光伏适配）各建表 + 扫描
+  uv run python -m solve.experiments.q2_regsrc            # 探针：精度 + 固定权重费用
+  uv run python -m solve.experiments.q2_regsrc --full     # 全流程：甲（严格）/乙（光伏适配）各建表 + 扫描
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ import pandas as pd
 import program as pm
 from solve import q2
 from solve.common import E0, ROOT
-from solve.q2_adaptive import AdaptiveWeightModel
+from solve.models.adaptive import AdaptiveWeightModel
 
 REP = list(range(q2.REPORT_START, q2.N_DAY))
 LAG_W = (28, 21, 14, 7)   # 周期型滞后（相隔 7 天）

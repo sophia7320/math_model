@@ -6,9 +6,9 @@
     滚动窗口选择（无前视）与离线最优（参考）。
 
 用法（program/ 下）：
-    uv run python -m solve.q3_proto_seg              # 全部
-    uv run python -m solve.q3_proto_seg --skip-seg   # 仅第一部分
-    uv run python -m solve.q3_proto_seg --skip-single
+    uv run python -m solve.experiments.q3_proto_seg              # 全部
+    uv run python -m solve.experiments.q3_proto_seg --skip-seg   # 仅第一部分
+    uv run python -m solve.experiments.q3_proto_seg --skip-single
 """
 from __future__ import annotations
 

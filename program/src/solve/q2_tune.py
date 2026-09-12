@@ -8,7 +8,7 @@ C. 风险目标：窗口选择目标改成 (1−λ)·均值 + λ·CVaR20（日�
 D. 权重收缩：w ← (1−α)·w* + α/3（抑制极端权重）。
 E. 精扫与稳健性：κ 细网格、κ×m、κ×小时裕度、动态 κ、分半验证。
 
-参考值来自 `q2e_structure.py`（报童临界比 0.8 → 残差分位数）。
+参考值来自 `solve/experiments/q2e_structure.py`（报童临界比 0.8 → 残差分位数）。
 运行（在 program/ 下）：uv run python -m solve.q2_tune
 """
 from __future__ import annotations
@@ -471,7 +471,7 @@ def main():
     pm.save_fig(fig, "Q2E_参数搜索", data=fig_data)
 
     # ---------- 报告 ----------
-    from solve.q2e_structure import record
+    from solve.io.report import record
 
     record(
         "问题二 口径E 参数搜索：标定窗口与 EWMA",

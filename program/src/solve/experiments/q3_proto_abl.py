@@ -9,9 +9,9 @@
   ④ 蒙特卡洛：残余误差整日块重采样，比较"有调整 vs 无调整"的费用分布与尾部风险
 
 运行（program/ 下）：
-    uv run python -m solve.q3_proto_abl              # 全部（约 6 分钟）
-    uv run python -m solve.q3_proto_abl --skip-mc    # 只做 ①②③
-    uv run python -m solve.q3_proto_abl --years 30
+    uv run python -m solve.experiments.q3_proto_abl              # 全部（约 6 分钟）
+    uv run python -m solve.experiments.q3_proto_abl --skip-mc    # 只做 ①②③
+    uv run python -m solve.experiments.q3_proto_abl --years 30
 """
 from __future__ import annotations
 

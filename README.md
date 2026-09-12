@@ -21,7 +21,7 @@
 口径说明：`result2.xlsx`（官方结果文件）由**口径 E 调优版（EWMA h=5 + κ=1.02 + m=50 kW）**生成
 （1406.6 万元；旧 W=7 版备份在 `code/outputs/result2_W7_backup.xlsx`，旧口径 D 版备份在
 `code/outputs/result2_D_backup.xlsx`）。参数搜索细节见 `reports/Q2_参数与分布结构专题.md`；
-另有预测器对照实验（`uv run python -m solve.q2_arima`）。
+另有预测器对照实验（`uv run python -m solve.experiments.q2_arima`）。
 详见 `reports/RESULTS_REPORT.md`；执行层信息结构见 `program/tests/solve_causal_test.py`。
 
 ## 快速开始
@@ -53,7 +53,7 @@ math_model/
 ├─ CUMCM2026Problems/          赛题原文与附件（A~E 题，当前用 C 题）
 ├─ program/                    代码工程（uv 项目，随根仓库统一管理）
 │  ├─ src/program/             工具箱（import program as pm；11 模块、100+ 函数）
-│  ├─ src/solve/               C 题求解（q1 / q2 / q2_adaptive / q2_arima / q3 / q4_price_* + 算法与设计文档）
+│  ├─ src/solve/               C 题求解（core/models/data/io/flows 分层；官方入口 q1~q4、q2_tune、q4_price_fit；experiments/ 专题脚本；legacy/ 早期脚本；docs/ 算法文档）
 │  ├─ data/C/                  附件 1~5（数据与官方结果模板）
 │  ├─ tests/                   工具箱冒烟测试（smoke_test.py）+ 因果执行回归测试（solve_causal_test.py）
 │  └─ AGENTS.md                工具箱 API 速查与常见坑（写代码前必读）
@@ -76,7 +76,7 @@ math_model/
 | --- | --- |
 | 题意与四问建模骨架 | `C题解读.md` |
 | 踩坑经验、当前进度 | `C题_经验总结.md` |
-| 口径 E 完整算法（公式/伪代码/结果） | `program/src/solve/口径E_自适应加权算法.md` |
+| 口径 E 完整算法（公式/伪代码/结果） | `program/src/solve/docs/口径E_自适应加权算法.md` |
 | 工具箱 API 与输出约定 | `program/AGENTS.md`、`program/README.md` |
 | 函数签名速查 | `数学建模函数速查表.md` |
 | 选模型/方法 | `建模参考资料/README.md` |

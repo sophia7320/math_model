@@ -15,7 +15,7 @@ append 新观测（refit=False）后再做 1 步预测。预测结果缓存到
 1. 预测精度：MAE / RMSE（kW，2025-02-01 ~ 12-31）；
 2. 全年费用：把预测代入同一套计划/执行/紧急购电模型（与问题二口径一致）。
 
-运行：uv run python -m solve.q2_arima   （在 program/ 目录；首次约 5 分钟，之后走缓存）
+运行：uv run python -m solve.experiments.q2_arima   （在 program/ 目录；首次约 5 分钟，之后走缓存）
 """
 from __future__ import annotations
 
@@ -31,7 +31,8 @@ from statsmodels.tsa.arima.model import ARIMA
 import program as pm
 from solve import q2
 from solve.common import DATA_C, E0, ROOT
-from solve.q2_adaptive import AdaptiveWeightModel, record
+from solve.io.report import record
+from solve.models.adaptive import AdaptiveWeightModel
 
 N_DAY = q2.N_DAY                  # 365
 REPORT_START = q2.REPORT_START    # 31（2025-02-01）
