@@ -768,10 +768,9 @@ def simulate_day_rt_hedge(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
             E_target[t1:] = E_adj
             x_hist[pub] = x_seq.copy()
         t = t1
-    seg = q2.exec_segment_causal(
-        load_kwh[108:144], pv_act_kwh[108:144], x_seq[108:144],
-        E_now, float(np.clip(E_target[143], E_MIN, E_MAX)),
-    )
+    seg = run_exec(exec_policy, load_kwh[108:144], pv_act_kwh[108:144],
+                   x_seq[108:144], E_now,
+                   float(np.clip(E_target[143], E_MIN, E_MAX)), last=True)
     e_total[108:] = seg["e"]
     c_all[108:] = seg["c"]
     d_all[108:] = seg["d"]
