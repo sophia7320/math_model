@@ -8,8 +8,15 @@
 - 调整 ``adjust_day``/``adjust_day_hedge``：
       [ adj 购电 | c | d | s | E | y 结算基准 ]
 
-本模块的函数均由旧实现逐行搬移，未改变约束矩阵、目标与变量顺序
-（HiGHS 对矩阵顺序敏感，重构期间以金标测试锁定数值）。
+统一实现：
+- ``plan_lp`` 是计划/多日计划 LP 的唯一构造（由 ``plan_day``（H=T 日循环）
+  与 ``plan_horizon``（H 可变、跨日）两个薄包装复用）；
+- ``_exec_lp`` 是事后执行 LP 的唯一构造（``exec_day`` 段长 T、日循环，
+  ``exec_segment_hindsight`` 任意段与终端）。
+
+HiGHS 对矩阵顺序敏感：本模块的矩阵构造在重构期间由金标测试锁定数值
+（plan_day ≡ plan_horizon(H=T) ≡ 旧 q1.build_lp(eps=0)；
+ exec_day ≡ exec_segment_hindsight(t0=0, e_end=e_start)）。
 """
 from __future__ import annotations
 
@@ -30,11 +37,6 @@ from solve.common import (
 )
 
 
-def _ix(b: int, t: int) -> int:
-    """一维变量索引：第 b 个变量块、第 t 个时段 → 拼接后的列号。"""
-    return b * T + t
-
-
 # ===========================================================================
 # 一、计划 LP（日前 / 多日滚动）
 #
@@ -46,72 +48,21 @@ def _ix(b: int, t: int) -> int:
 #          E_0 = e_start,  E_{H-1} = e_terminal       （跨日/日循环终端条件）
 #
 #     ε=0 时与"纯购电费最小"完全一致（计划 LP）；ε>0 在等费用平面上
-#     唯一化充放方案，供口径 E 标定使用。
+#     唯一化充放方案，供口径 E 标定与 Q3/Q4 使用。
 # ===========================================================================
-def plan_day(price, load_kwh, pv_kwh, e_start, eps=0.0):
-    """当日计划 LP：min Σp·x + eps·Σ(c+d)；储能循环 E(0)=E(24)=e_start。
+def plan_lp(price_h, load_h, pv_h, e_start, e_terminal, eps=0.0):
+    """统一计划 LP：返回完整解字典与 OptResult。
 
-    eps > 0 为极小正则项，用于在等价位内唯一化购电/充放方案（口径 E 标定）；
-    默认 0 与原有口径完全一致。返回 (x, E, res)。
-    """
-    n = 5 * T
-    c_obj = np.zeros(n)
-
-    # 目标函数：仅购电量 x 按电价计费；c/d 加 ε 罚项抑制无意义充放
-    c_obj[0:T] = price
-    c_obj[T:3 * T] = eps
-
-    # ---- 等式约束行布局：[0, T) 功率平衡；[T, 2T) 储能动态；第 2T 行终端条件 ----
-    A_eq = lil_matrix((2 * T + 1, n))
-    b_eq = np.zeros(2 * T + 1)
-
-    for t in range(T):
-        # 功率平衡：+x_t + d_t − c_t − s_t = L_t − P_t
-        A_eq[t, _ix(0, t)] = 1
-        A_eq[t, _ix(1, t)] = -1
-        A_eq[t, _ix(2, t)] = 1
-        A_eq[t, _ix(3, t)] = -1
-        b_eq[t] = load_kwh[t] - pv_kwh[t]
-
-    for t in range(T):
-        # 储能动态：E_t − E_{t-1} − η·c_t + d_t/η = 0（t=0 时右端为 e_start）
-        r = T + t
-        A_eq[r, _ix(4, t)] = 1
-        if t:
-            A_eq[r, _ix(4, t - 1)] = -1
-        A_eq[r, _ix(1, t)] = -ETA
-        A_eq[r, _ix(2, t)] = 1.0 / ETA
-        b_eq[r] = e_start if t == 0 else 0.0
-
-    # 终端条件：E_{T-1} = e_start（日循环，日初=日末）
-    A_eq[2 * T, _ix(4, T - 1)] = 1
-    b_eq[2 * T] = e_start
-
-    # 变量边界：x∈[0,∞)，c,d∈[0,P̄]，s∈[0,该槽可用光伏]，E∈[E_min,E_max]
-    bounds = (
-        [(0.0, None)] * T
-        + [(0.0, P_MAX_E)] * T
-        + [(0.0, P_MAX_E)] * T
-        + [(0.0, float(v)) for v in pv_kwh]
-        + [(E_MIN, E_MAX)] * T
-    )
-    res = pm.optimize.solve_lp(c_obj, A_eq=csr_matrix(A_eq), b_eq=b_eq, bounds=bounds)
-    if not res.success:
-        raise RuntimeError(f"计划 LP 失败：{res.message}")
-    return res.x[0:T], res.x[4 * T:5 * T], res
-
-
-def plan_horizon(price_h, load_h, pv_h, e_start, e_terminal, eps=1e-3):
-    """多日计划 LP：min Σp·x + eps·Σ(c+d)；储能跨日连续 E(0)=e_start、E(H)=e_terminal。
-
-    与 :func:`plan_day` 同一约束结构，只是时段数 H 可变（2 日滚动）。
+    解字典键：x 购电、c 充、d 放、s 弃光、E 储电量（均为长度 H 数组）。
     """
     H = len(price_h)
     n = 5 * H
     c_obj = np.zeros(n)
+    # 目标函数：仅购电量 x 按电价计费；c/d 加 ε 罚项抑制无意义充放
     c_obj[0:H] = price_h
     c_obj[H:3 * H] = eps
 
+    # ---- 等式约束行布局：[0, H) 功率平衡；[H, 2H) 储能动态；第 2H 行终端条件 ----
     A_eq = lil_matrix((2 * H + 1, n))
     b_eq = np.zeros(2 * H + 1)
     for t in range(H):
@@ -122,7 +73,7 @@ def plan_horizon(price_h, load_h, pv_h, e_start, e_terminal, eps=1e-3):
         A_eq[t, 3 * H + t] = -1.0
         b_eq[t] = load_h[t] - pv_h[t]
     for t in range(H):
-        # 储能动态：E_t − E_{t-1} − η·c_t + d_t/η = 0
+        # 储能动态：E_t − E_{t-1} − η·c_t + d_t/η = 0（t=0 时右端为 e_start）
         r = H + t
         A_eq[r, 4 * H + t] = 1.0
         if t:
@@ -130,10 +81,11 @@ def plan_horizon(price_h, load_h, pv_h, e_start, e_terminal, eps=1e-3):
         A_eq[r, 1 * H + t] = -ETA
         A_eq[r, 2 * H + t] = 1.0 / ETA
         b_eq[r] = e_start if t == 0 else 0.0
-    # 终端条件：E_{H-1} = e_terminal（跨日循环）
+    # 终端条件：E_{H-1} = e_terminal（日循环或跨日循环）
     A_eq[2 * H, 4 * H + H - 1] = 1.0
     b_eq[2 * H] = e_terminal
 
+    # 变量边界：x∈[0,∞)，c,d∈[0,P̄]，s∈[0,该槽可用光伏]，E∈[E_min,E_max]
     bounds = (
         [(0.0, None)] * H
         + [(0.0, P_MAX_E)] * H
@@ -143,8 +95,31 @@ def plan_horizon(price_h, load_h, pv_h, e_start, e_terminal, eps=1e-3):
     )
     res = pm.optimize.solve_lp(c_obj, A_eq=csr_matrix(A_eq), b_eq=b_eq, bounds=bounds)
     if not res.success:
-        raise RuntimeError(f"多日计划 LP 失败：{res.message}")
-    return res.x[0:H], res.x[4 * H:5 * H]
+        raise RuntimeError(f"计划 LP 失败：{res.message}")
+    sol = {
+        "x": res.x[0:H],
+        "c": res.x[H:2 * H],
+        "d": res.x[2 * H:3 * H],
+        "s": res.x[3 * H:4 * H],
+        "E": res.x[4 * H:5 * H],
+    }
+    return sol, res
+
+
+def plan_day(price, load_kwh, pv_kwh, e_start, eps=0.0):
+    """当日计划 LP：min Σp·x + eps·Σ(c+d)；储能循环 E(0)=E(24)=e_start。
+
+    eps > 0 为极小正则项，用于在等价位内唯一化购电/充放方案（口径 E 标定）；
+    默认 0 与原有口径完全一致。返回 (x, E, res)。
+    """
+    sol, res = plan_lp(price, load_kwh, pv_kwh, e_start, e_start, eps)
+    return sol["x"], sol["E"], res
+
+
+def plan_horizon(price_h, load_h, pv_h, e_start, e_terminal, eps=1e-3):
+    """多日计划 LP：min Σp·x + eps·Σ(c+d)；储能跨日连续 E(0)=e_start、E(H)=e_terminal。"""
+    sol, _res = plan_lp(price_h, load_h, pv_h, e_start, e_terminal, eps)
+    return sol["x"], sol["E"]
 
 
 # ===========================================================================
@@ -153,71 +128,12 @@ def plan_horizon(price_h, load_h, pv_h, e_start, e_terminal, eps=1e-3):
 #     min  ε·Σ(c_t + d_t) + Σ_t 5·p_t·e_t
 #     s.t. P_t + d_t + e_t = L_t + c_t + s_t + x_t   （x 已承诺 take-or-pay）
 #          E_t = E_{t-1} + η·c_t − d_t/η
-#          E_0 = E_{H-1} = e_start                   （日循环）
+#          E_end = e_end                              （日循环或段末终端）
 #
-#     仅作"全天信息已知"的理论下界；正式口径为逐槽因果执行（core.causal）。
+#     仅作"全天/整段信息已知"的理论下界；正式口径为逐槽因果执行（core.causal）。
 # ===========================================================================
-def exec_day(price, load_kwh, pv_kwh, x_plan, e_start):
-    """事后执行下界：x 已承诺，使用全天实际曲线重优化储能。
-
-    本函数保留给历史对照和理论下界，**不得**标记为"实时执行"；
-    正式因果口径使用 :func:`solve.core.causal.exec_day_causal` /
-    :func:`solve.core.causal.exec_segment_causal`。
-
-    变量块：0=c 充电 1=d 放电 2=s 弃电 3=E 储电量 4=e 紧急购电。
-    """
-    n = 5 * T
-    c_obj = np.zeros(n)
-    # 目标：c/d 唯一化罚项；紧急购电按 5 倍电价惩罚
-    c_obj[0:T] = EPS_THROUGHPUT
-    c_obj[T:2 * T] = EPS_THROUGHPUT
-    c_obj[4 * T:5 * T] = EMERG_MULT * price
-
-    A_eq = lil_matrix((2 * T + 1, n))
-    b_eq = np.zeros(2 * T + 1)
-    for t in range(T):
-        # 供需平衡：−c_t + d_t − s_t + e_t = L_t − P_t − x_t（缺口由 e 或放电补齐）
-        A_eq[t, _ix(0, t)] = -1
-        A_eq[t, _ix(1, t)] = 1
-        A_eq[t, _ix(2, t)] = -1
-        A_eq[t, _ix(4, t)] = 1
-        b_eq[t] = load_kwh[t] - pv_kwh[t] - x_plan[t]
-    for t in range(T):
-        # 储能动态：E_t − E_{t-1} − η·c_t + d_t/η = 0
-        r = T + t
-        A_eq[r, _ix(3, t)] = 1
-        if t:
-            A_eq[r, _ix(3, t - 1)] = -1
-        A_eq[r, _ix(0, t)] = -ETA
-        A_eq[r, _ix(1, t)] = 1.0 / ETA
-        b_eq[r] = e_start if t == 0 else 0.0
-    A_eq[2 * T, _ix(3, T - 1)] = 1          # 日循环：E(24:00) = E(0:00)
-    b_eq[2 * T] = e_start
-    bounds = (
-        [(0.0, P_MAX_E)] * T
-        + [(0.0, P_MAX_E)] * T
-        + [(0.0, None)] * T
-        + [(E_MIN, E_MAX)] * T
-        + [(0.0, None)] * T
-    )
-    res = pm.optimize.solve_lp(c_obj, A_eq=csr_matrix(A_eq), b_eq=b_eq, bounds=bounds)
-    if not res.success:
-        raise RuntimeError(f"执行 LP 失败：{res.message}")
-    return {
-        "c": res.x[0:T], "d": res.x[T:2 * T], "s": res.x[2 * T:3 * T],
-        "E": res.x[3 * T:4 * T], "e": res.x[4 * T:5 * T],
-    }
-
-
-def exec_segment_hindsight(price, load_kwh, pv_kwh, x_seg, e_start, e_end, t0, eps=EPS_TH):
-    """事后段执行下界：使用整段实际功率重优化储能。
-
-    仅用于理论下界对照，**不得**进入实时口径；正式因果执行使用
-    :func:`solve.core.causal.exec_segment_causal`（逐槽只读当前已实现值）。
-
-    变量块：0=c 充 1=d 放 2=s 弃 3=E 储电量 4=e 紧急；返回 c/d/s/E/e 字典。
-    与 :func:`exec_day` 同构，支持任意段 [t0, t0+m) 与段末终端 e_end。
-    """
+def _exec_lp(price, load_kwh, pv_kwh, x_seg, e_start, e_end, t0, eps):
+    """统一事后执行 LP：对段 [t0, t0+m) 重优化储能；返回 c/d/s/E/e 字典。"""
     m = len(x_seg)
     n = 5 * m
 
@@ -225,6 +141,7 @@ def exec_segment_hindsight(price, load_kwh, pv_kwh, x_seg, e_start, e_end, t0, e
         return b * m + i
 
     c_obj = np.zeros(n)
+    # 目标：c/d 唯一化罚项；紧急购电按 5 倍电价惩罚
     c_obj[0:m] = eps
     c_obj[m:2 * m] = eps
     c_obj[4 * m:5 * m] = EMERG_MULT * price[t0:t0 + m]
@@ -233,7 +150,7 @@ def exec_segment_hindsight(price, load_kwh, pv_kwh, x_seg, e_start, e_end, t0, e
     A_eq = lil_matrix((rows, n))
     b_eq = np.zeros(rows)
     for i in range(m):
-        # 供需平衡：−c_i + d_i − s_i + e_i = L − P − x_seg
+        # 供需平衡：−c_i + d_i − s_i + e_i = L − P − x_seg（缺口由 e 或放电补齐）
         A_eq[i, I(0, i)] = -1.0
         A_eq[i, I(1, i)] = 1.0
         A_eq[i, I(2, i)] = -1.0
@@ -261,11 +178,31 @@ def exec_segment_hindsight(price, load_kwh, pv_kwh, x_seg, e_start, e_end, t0, e
     )
     res = pm.optimize.solve_lp(c_obj, A_eq=csr_matrix(A_eq), b_eq=b_eq, bounds=bounds)
     if not res.success:
-        raise RuntimeError(f"段执行 LP 失败（t0={t0}）：{res.message}")
+        raise RuntimeError(f"执行 LP 失败（t0={t0}）：{res.message}")
     return {
         "c": res.x[0:m], "d": res.x[m:2 * m], "s": res.x[2 * m:3 * m],
         "E": res.x[3 * m:4 * m], "e": res.x[4 * m:5 * m],
     }
+
+
+def exec_day(price, load_kwh, pv_kwh, x_plan, e_start):
+    """事后执行下界：x 已承诺，使用全天实际曲线重优化储能。
+
+    本函数保留给历史对照和理论下界，**不得**标记为"实时执行"；
+    正式因果口径使用 :func:`solve.core.causal.exec_day_causal` /
+    :func:`solve.core.causal.exec_segment_causal`。
+    """
+    return _exec_lp(price, load_kwh, pv_kwh, x_plan, e_start, e_start, 0,
+                    EPS_THROUGHPUT)
+
+
+def exec_segment_hindsight(price, load_kwh, pv_kwh, x_seg, e_start, e_end, t0, eps=EPS_TH):
+    """事后段执行下界：使用整段实际功率重优化储能。
+
+    仅用于理论下界对照，**不得**进入实时口径；正式因果执行使用
+    :func:`solve.core.causal.exec_segment_causal`（逐槽只读当前已实现值）。
+    """
+    return _exec_lp(price, load_kwh, pv_kwh, x_seg, e_start, e_end, t0, eps)
 
 
 # ===========================================================================

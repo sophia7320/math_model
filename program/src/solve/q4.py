@@ -42,6 +42,7 @@ from solve.flows.q4_year import (
     total_of,
     total_of_q3,
 )
+from solve.io.checks import verify_records
 from solve.io.excel import (
     verify_result4_2,
     verify_result4_3,
@@ -50,41 +51,6 @@ from solve.io.excel import (
 )
 from solve.io.report import record
 from solve.models.price import price_forecast_d, price_forecast_next, rolling_v_seq  # noqa: F401
-
-
-# ---------------------------------------------------------------------------
-# 校验
-# ---------------------------------------------------------------------------
-def verify(recs, data, p4) -> dict:
-    """约束回代：功率平衡、SOC 动态、区间、充放互斥。
-
-    逐日最大残差：
-        平衡  max_t |P_t + x_t + d_t + e_t − L_t − c_t − s_t|
-        动态  max_t |E_t − E_{t-1} − η·c_t + d_t/η|
-    """
-    load, pv_act = data["load"], data["pv_act"]
-    bal = dyn = 0.0
-    emin, emax = np.inf, -np.inf
-    overlap = 0
-    for r in recs:
-        D = r["D"]
-        if D < REPORT_START:
-            continue
-        res = pv_act[D] / 6.0 + r["x"] + r["d"] + r["e"] - load[D] / 6.0 - r["c"] - r["s"]
-        bal = max(bal, float(np.abs(res).max()))
-        E = np.concatenate([[r["E_start"]], r["E"]])
-        dyn = max(dyn, float(np.abs(np.diff(E) - (ETA * r["c"] - r["d"] / ETA)).max()))
-        emin = min(emin, float(r["E"].min()))
-        emax = max(emax, float(r["E"].max()))
-        overlap += int(np.sum((r["c"] > 1e-7) & (r["d"] > 1e-7)))
-    return {
-        "功率平衡最大残差/kWh": bal,
-        "储能动态最大残差/kWh": dyn,
-        "储电量最小值/kWh": emin,
-        "储电量最大值/kWh": emax,
-        "约束区间检查": bool(emin >= E_MIN - 1e-6 and emax <= E_MAX + 1e-6),
-        "同槽同时充放次数": overlap,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +90,7 @@ def run_result42() -> None:
     recs_h = run_year(data, p4, p_typ, vseq, price_mode="H", storage="2day")
     recs_g = run_year(data, p4, p_typ, vseq, price_mode="G", storage="2day")
     s_h, s_g = total_of(recs_h), total_of(recs_g)
-    chk = verify(recs_h, data, p4)
+    chk = verify_records(recs_h, data, x_key="x")
     print(f"问题四 Q2 层：H {s_h['total']/1e4:.1f} 万（计划 {s_h['plan']/1e4:.1f} + "
           f"紧急 {s_h['emerg']/1e4:.1f}）；G {s_g['total']/1e4:.1f} 万；"
           f"电价信息价值 {100*(s_h['total']-s_g['total'])/s_h['total']:.2f}%（{time.time()-t0:.0f}s）")
@@ -203,39 +169,6 @@ def probe_q3() -> None:
                               index=False, encoding="utf-8-sig")
 
 
-def verify_q3(recs, data, p4) -> dict:
-    """Q3 层约束回代：功率平衡、SOC 动态、区间、充放互斥、场景无前视。"""
-    load, pv_act = data["load"], data["pv_act"]
-    bal = dyn = 0.0
-    emin, emax = np.inf, -np.inf
-    overlap = 0
-    future_viol = 0
-    for r in recs:
-        D = r["D"]
-        if D < REPORT_START:
-            continue
-        res = (pv_act[D] / 6.0 + r["x_final"] + r["d"] + r["e"]
-               - load[D] / 6.0 - r["c"] - r["s"])
-        bal = max(bal, float(np.abs(res).max()))
-        E = np.concatenate([[r["E_start"]], r["E"]])
-        dyn = max(dyn, float(np.abs(np.diff(E) - (ETA * r["c"] - r["d"] / ETA)).max()))
-        emin = min(emin, float(r["E"].min()))
-        emax = max(emax, float(r["E"].max()))
-        overlap += int(np.sum((r["c"] > 1e-7) & (r["d"] > 1e-7)))
-        # 场景池无前视：采样日序号必须 < 目标日 D
-        if int(r.get("scenario_max_day", -1)) >= D:
-            future_viol += 1
-    return {
-        "功率平衡最大残差/kWh": bal,
-        "储能动态最大残差/kWh": dyn,
-        "储电量最小值/kWh": emin,
-        "储电量最大值/kWh": emax,
-        "约束区间检查": bool(emin >= E_MIN - 1e-6 and emax <= E_MAX + 1e-6),
-        "同槽同时充放次数": overlap,
-        "场景池前视违规天数": future_viol,
-    }
-
-
 def make_figures_q3(daily_df) -> None:
     """Q3 层论文图：策略对比（来自探针表）+ 官方配置逐日紧急购电。"""
     probe_csv = ROOT / "code" / "outputs" / "q4_q3_probe.csv"
@@ -266,7 +199,7 @@ def run_result43() -> None:
     recs_h = run_year_q3(data, p4, p_typ, vseq, price_mode="H", **kw)
     recs_g = run_year_q3(data, p4, p_typ, vseq, price_mode="G", **kw)
     s_h, s_g = total_of_q3(recs_h), total_of_q3(recs_g)
-    chk = verify_q3(recs_h, data, p4)
+    chk = verify_records(recs_h, data, x_key="x_final", scenario=True)
     print(f"问题四 Q3 层：H {s_h['total']/1e4:.1f} 万（买入 {s_h['buy']/1e4:.1f} + "
           f"偏差 {s_h['dev']/1e4:.1f} + 紧急 {s_h['emerg']/1e4:.1f}）；G {s_g['total']/1e4:.1f} 万"
           f"（{time.time()-t0:.0f}s）")

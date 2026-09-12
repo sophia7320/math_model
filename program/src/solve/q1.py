@@ -26,7 +26,6 @@ from pathlib import Path
 import numpy as np
 import openpyxl
 import pandas as pd
-from scipy.sparse import csr_matrix, lil_matrix
 
 import program as pm
 from solve.common import (
@@ -41,13 +40,9 @@ from solve.common import (
     T,
     read_attachment,
 )
+from solve.core.lp import plan_lp
 
 N_VAR = 5 * T  # 5 类变量 × 144 时段
-
-
-def _ix(block: int, t: int) -> int:
-    """变量索引：0=x 购电，1=c 充电，2=d 放电，3=s 弃光，4=E 储电量。"""
-    return block * T + t
 
 
 # ---------------------------------------------------------------------------
@@ -56,52 +51,10 @@ def _ix(block: int, t: int) -> int:
 def build_lp(price: np.ndarray, load_kwh: np.ndarray, pv_kwh: np.ndarray):
     """构建并求解问题一连续 LP，返回 ``(OptResult, 解字典)``。
 
+    复用统一计划 LP（core.lp.plan_lp，日循环 E(0)=E(144)=E0、eps=0）；
     所有能量量纲为 kWh/时段，功率量纲为 kW（乘 1/6 转 kWh）。
     """
-    c_obj = np.zeros(N_VAR)
-    c_obj[0:T] = price  # 只有购电产生费用
-
-    A_eq = lil_matrix((2 * T + 1, N_VAR))
-    b_eq = np.zeros(2 * T + 1)
-
-    for t in range(T):  # ① 功率平衡
-        A_eq[t, _ix(0, t)] = 1.0  # + 购电
-        A_eq[t, _ix(1, t)] = -1.0  # − 充电
-        A_eq[t, _ix(2, t)] = 1.0  # + 放电
-        A_eq[t, _ix(3, t)] = -1.0  # − 弃光
-        b_eq[t] = load_kwh[t] - pv_kwh[t]
-
-    for t in range(T):  # ② 储能动态
-        r = T + t
-        A_eq[r, _ix(4, t)] = 1.0  # E_t
-        if t:
-            A_eq[r, _ix(4, t - 1)] = -1.0  # − E_{t-1}
-        A_eq[r, _ix(1, t)] = -ETA  # − η·c_t
-        A_eq[r, _ix(2, t)] = 1.0 / ETA  # + d_t/η
-        b_eq[r] = E0 if t == 0 else 0.0
-
-    A_eq[2 * T, _ix(4, T - 1)] = 1.0  # ③ 末值：E_144 = E_0
-    b_eq[2 * T] = E0
-
-    bounds = (
-        [(0.0, None)] * T  # x ≥ 0
-        + [(0.0, P_MAX_E)] * T  # 0 ≤ c ≤ 833.33
-        + [(0.0, P_MAX_E)] * T  # 0 ≤ d ≤ 833.33
-        + [(0.0, float(v)) for v in pv_kwh]  # 0 ≤ s ≤ 该时段可用光伏
-        + [(E_MIN, E_MAX)] * T  # 储电量安全区间
-    )
-
-    res = pm.optimize.solve_lp(c_obj, A_eq=csr_matrix(A_eq), b_eq=b_eq, bounds=bounds)
-    if not res.success:
-        raise RuntimeError(f"问题一连续 LP 求解失败：{res.message}")
-
-    sol = {
-        "x": res.x[0:T],
-        "c": res.x[T : 2 * T],
-        "d": res.x[2 * T : 3 * T],
-        "s": res.x[3 * T : 4 * T],
-        "E": res.x[4 * T : 5 * T],
-    }
+    sol, res = plan_lp(price, load_kwh, pv_kwh, E0, E0, eps=0.0)
     return res, sol
 
 

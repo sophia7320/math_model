@@ -173,7 +173,7 @@ def main():
         note=(
             "主方案：0:00 计划用组合预测（λ=0.7·官方f0 + 0.3·历史口E，历史权重参数平滑 β=0.1）；"
             "6/12/18 点用同组合口径的最新预报调整；6:00/12:00 叠加无前视场景对冲"
-            "（残差块仅取自目标日之前，10 情景）；逐槽因果执行（core.causal.exec_segment_causal，"
+            "（残差块仅取自目标日之前，10 情景）；逐槽因果执行（q2.exec_segment_causal，"
             "不读取未来实际值），缺口 5 倍紧急。结算 = Σ[p·x_adj + 0.5p|x_plan−x_adj|] + 5Σp·e。"
             "result3.xlsx 已生成并回读校验；图 figures/Q3_策略费用对比.pdf、Q3_逐日紧急购电.pdf、"
             "Q3_调整量分布.pdf；逐日表 code/outputs/q3_daily.csv。"

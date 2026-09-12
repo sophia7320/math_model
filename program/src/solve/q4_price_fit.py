@@ -18,7 +18,7 @@ import pandas as pd
 
 import program as pm
 from solve import q2
-from solve.common import DATA_C, E0, ROOT, T
+from solve.common import DATA_C, E0, ROOT
 from solve.models.price import forecast_price  # 唯一实现（models/price.py），此处再导出
 from solve.models.weights import simplex_grid  # 唯一实现（models/weights.py）
 
@@ -29,25 +29,6 @@ N_DAY = q2.N_DAY                 # 365
 def mae_of(p4, p_typ, v, days):
     errs = [np.abs(forecast_price(D, v, p4, p_typ) - p4[D]).mean() for D in days]
     return float(np.mean(errs))
-
-
-def run_year(p4, p_typ, data, v, days):
-    """全年计划/执行（跨日连续储能），返回 [DAY_START, 365) 的费用与紧急量。"""
-    load = data["load"]; pv_act = data["pv_act"]; fc0 = data["fc0"]
-    E = E0
-    tot_cost = 0.0
-    emerg_kwh = 0.0
-    for D in range(N_DAY):
-        p_hat = forecast_price(D, v, p4, p_typ) if D >= 7 else p4[D]
-        load_kwh = load[D] / 6.0
-        pv_fc = q2._hour_to_slots(fc0[D]) / 6.0
-        x, _E_plan, _ = q2.plan_day(p_hat, load_kwh, pv_fc, E, eps=1e-3)
-        ex = q2.exec_day_causal(p4[D], load_kwh, pv_act[D] / 6.0, x, E)
-        E = float(ex["E"][-1])
-        if D >= DAY_START:
-            tot_cost += float(p4[D] @ x + q2.EMERG_MULT * (p4[D] @ ex["e"]))
-            emerg_kwh += float(ex["e"].sum())
-    return tot_cost, emerg_kwh
 
 
 def main():
