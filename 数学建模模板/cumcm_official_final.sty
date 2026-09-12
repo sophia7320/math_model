@@ -1,0 +1,171 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{cumcm_official_final}[2026/08/03 restrained academic CUMCM final style]
+
+% 最终推荐版只使用 cumcmthesis 已加载的宏包，不引入 xurl、mathtools、makecell 等额外依赖。
+% 视觉原则：黑白、克制、层次清楚；彩色仅保留在原始数据图件中。
+\definecolor{CUMCMInk}{RGB}{24,24,24}
+\definecolor{CUMCMGray}{RGB}{88,88,88}
+\definecolor{CUMCMRule}{RGB}{135,135,135}
+
+% 正文节奏：小四字附近、适度行距、紧凑但不拥挤。
+\AtBeginDocument{%
+  \renewcommand*{\baselinestretch}{1.28}\normalsize
+  \setlength{\parskip}{0pt}
+  \setlength{\abovedisplayskip}{8.5pt plus 2pt minus 3pt}
+  \setlength{\belowdisplayskip}{8.5pt plus 2pt minus 3pt}
+  \setlength{\abovedisplayshortskip}{3pt plus 2pt}
+  \setlength{\belowdisplayshortskip}{5.5pt plus 2pt minus 2pt}
+  \setlength{\textfloatsep}{14pt plus 3pt minus 3pt}
+  \setlength{\intextsep}{12pt plus 3pt minus 3pt}
+  \setlength{\floatsep}{11pt plus 3pt minus 2pt}
+  \setlength{\tabcolsep}{5.5pt}
+  \emergencystretch=2em
+  \clubpenalty=8000
+  \widowpenalty=8000
+  \displaywidowpenalty=8000
+}
+
+% 无页眉，页脚中央仅保留阿拉伯数字页码。
+\def\ps@plain{%
+  \let\@mkboth\@gobbletwo
+  \let\@oddhead\@empty
+  \let\@evenhead\@empty
+  \def\@oddfoot{\hfil{\zihao{5}\color{CUMCMGray}\thepage}\hfil}%
+  \let\@evenfoot\@oddfoot
+}
+\pagestyle{plain}
+\raggedbottom
+
+% 电子版摘要专用页：主标题与解释性副标题分层，但全部使用黑色。
+% 不加入身份信息、彩色标题、装饰线或页眉。
+\let\cumcm@original@makeothertitle\makeothertitle
+\def\makeothertitle{%
+  \if@mcm@preface
+    \cumcm@original@makeothertitle
+  \else
+    \setcounter{page}{1}%
+    \thispagestyle{plain}%
+    \vspace*{-0.25em}%
+    \begin{center}%
+      {\heiti\bfseries\zihao{-2}\color{CUMCMInk}\papertitlemain\par}%
+      \vspace{0.55em}%
+      {\heiti\zihao{4}\color{CUMCMInk}\papertitlesub\par}%
+    \end{center}%
+    \vspace{1.15em}%
+  \fi
+}
+
+% 摘要：普通居中黑体标题；正文宽度略收窄以提高可读性。
+\renewenvironment{abstract}{%
+  \begin{center}%
+    {\heiti\bfseries\zihao{3}\color{CUMCMInk}\abstractname\par}%
+    \vspace{0.55em}%
+    \begin{minipage}{0.94\textwidth}%
+      \zihao{-4}%
+      \renewcommand*{\baselinestretch}{1.31}\selectfont
+      \setlength{\parindent}{2em}%
+      \setlength{\parskip}{0.26em}%
+}{%
+    \end{minipage}%
+  \end{center}%
+  \newpage\null
+}
+
+% 关键词不使用底色或彩色分隔，保持传统科技论文样式。
+\renewcommand\keywords[1]{%
+  \renewcommand{\mcm@tokens@keywords}{#1}%
+  \par\vspace{0.48em}%
+  \noindent{\zihao{5}\heiti\bfseries\color{CUMCMInk}关键词：}%
+  {\zihao{5}\color{CUMCMInk}\mcm@tokens@keywords}%
+}
+
+% 章节编号采用往年优秀论文中最常见的紧凑形式，避免“1 . 1”式疏散编号。
+\renewcommand\thesubsection{\arabic{section}.\arabic{subsection}}
+\renewcommand\thesubsubsection{\thesubsection.\arabic{subsubsection}}
+
+% 标题层级：一级标题居中，二、三级标题左对齐；全部黑色。
+\renewcommand\section{\@startsection{section}{1}{\z@}%
+  {-2.9ex \@plus -0.9ex \@minus -.2ex}%
+  {1.55ex \@plus .2ex}%
+  {\centering\heiti\bfseries\zihao{-3}\color{CUMCMInk}}}
+\renewcommand\subsection{\@startsection{subsection}{2}{\z@}%
+  {-2.45ex \@plus -0.7ex \@minus -.2ex}%
+  {1.05ex \@plus .2ex}%
+  {\heiti\bfseries\zihao{4}\color{CUMCMInk}}}
+\renewcommand\subsubsection{\@startsection{subsubsection}{3}{\z@}%
+  {-2.0ex \@plus -0.5ex \@minus -.2ex}%
+  {0.8ex \@plus .2ex}%
+  {\heiti\bfseries\zihao{-4}\color{CUMCMInk}}}
+
+% 防止一级标题孤立在页末：若剩余空间不足以容纳标题、二级标题和数行正文，则自动换页。
+\let\cumcm@section@base\section
+\renewcommand{\section}{%
+  \par
+  \ifdim\dimexpr\pagegoal-\pagetotal\relax<7\baselineskip
+    \newpage
+  \fi
+  \cumcm@section@base
+}
+
+% 正文 AI 辅助位置使用克制的段末上标，不改变正文结构。
+\newcommand{\AIassistmark}{\textsuperscript{\zihao{-6}\normalfont[AI]}}
+
+% 图表题注：编号加粗、说明正常字重，均为黑色。
+\captionsetup[figure]{%
+  format=hang,
+  labelsep=quad,
+  font={song,small},
+  labelfont={bf},
+  textfont={normalfont},
+  justification=justified,
+  singlelinecheck=true,
+  skip=7pt,
+  position=bottom
+}
+\captionsetup[table]{%
+  format=plain,
+  labelsep=quad,
+  font={song,small},
+  labelfont={bf},
+  textfont={normalfont},
+  justification=centering,
+  singlelinecheck=false,
+  skip=6pt,
+  position=top
+}
+
+% 表格使用正文已有的三线表规则，仅调整行距。
+\let\cumcm@oldtabular\tabular
+\let\cumcm@endoldtabular\endtabular
+\renewenvironment{tabular}{%
+  \bgroup
+  \renewcommand{\arraystretch}{1.26}%
+  \cumcm@oldtabular
+}{%
+  \cumcm@endoldtabular
+  \egroup
+}
+
+% 列表略收紧，便于评阅者快速扫描。
+\setlist[enumerate]{leftmargin=2.35em,labelsep=0.55em,itemsep=0.20em,topsep=0.38em,parsep=0pt}
+\setlist[itemize]{leftmargin=2.15em,labelsep=0.55em,itemsep=0.18em,topsep=0.36em,parsep=0pt}
+
+% 每问结论采用传统行内强调，不设彩色底纹或装饰框。
+\renewcommand{\questionconclusion}[1]{%
+  \par\medskip
+  \noindent\textbf{本问结论：}#1%
+  \par\medskip
+}
+
+% 参考文献适度紧凑。
+\AtBeginEnvironment{thebibliography}{%
+  \zihao{5}%
+  \renewcommand*{\baselinestretch}{1.15}\selectfont
+  \setlength{\itemsep}{0.18em}%
+  \setlength{\parsep}{0pt}%
+}
+
+% 超链接无边框、无彩色文本，适合屏幕与黑白打印。
+\AtBeginDocument{\hypersetup{hidelinks}}
+
+\endinput

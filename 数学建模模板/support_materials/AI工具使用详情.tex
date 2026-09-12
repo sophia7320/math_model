@@ -1,0 +1,59 @@
+% !TeX program = xelatex
+\documentclass[a4paper,11pt]{ctexart}
+\usepackage[margin=25mm]{geometry}
+\usepackage{booktabs,tabularx,array,longtable,enumitem,hyperref}
+\hypersetup{hidelinks}
+\setlength{\parindent}{2em}
+\renewcommand{\arraystretch}{1.35}
+\title{AI 工具使用详情（核对稿）}
+\author{}
+\date{2026年8月3日}
+\begin{document}
+\maketitle
+
+\section*{一、工具名称和版本}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{0.25\textwidth}X}
+工具名称 & ChatGPT \\
+版本／型号 & GPT-5.6 Thinking \\
+开发机构 & OpenAI \\
+使用日期 & 2026年8月3日（以及参赛队实际使用的其他日期，提交前补全） \\
+\end{tabularx}
+
+\section*{二、具体使用目的和环节}
+根据当前可见会话，AI 工具至少用于：论文内容转写为 LaTeX、套用数学建模模板、排版优化、
+XeLaTeX 编译排错、依据 2026 年官方规范调整电子版格式和检查提交要求。
+
+若 AI 还参与了研究思路、模型建立、参数设定、程序编写、数据处理、数值计算、图表生成或结论分析，
+必须在本文件中逐项补充，不能只写“用于润色和排版”。
+
+\section*{三、当前可确认的关键交互记录}
+\begin{longtable}{>{\centering\arraybackslash}p{0.07\textwidth}p{0.34\textwidth}p{0.48\textwidth}}
+\toprule
+序号 & 重要提示词／请求 & AI 回复及采纳、修改情况 \\
+\midrule
+\endfirsthead
+\toprule
+序号 & 重要提示词／请求 & AI 回复及采纳、修改情况 \\
+\midrule
+\endhead
+1 & “把第一篇论文按照第二个文件的模板输出对应的 tex。” & 将原论文内容转换为基于 \texttt{cumcmthesis} 的 LaTeX 工程；参赛队应核对正文、公式、图表和参考文献是否与原稿一致。 \\
+2 & “按照你的想法，把排版尽可能美观。” & 调整标题、页眉页脚、表格和结论框等视觉样式；后续因竞赛官方格式要求，已撤销可能造成非标准化的自定义页眉、彩色标题和装饰性版式。 \\
+3 & “编译有问题。” & 排查主文件、编译器和工程目录结构，统一为 XeLaTeX 编译，并生成可在 Overleaf 使用的完整工程。 \\
+4 & “按照数学建模官方的要求。” & 查询全国组委会 2026 年论文格式规范与 AI 工具使用规定，调整为 A4、25 mm 页边距、无目录、摘要页为电子版第一页、页脚居中编号，并增加 AI 使用说明与支撑材料核对项。 \\
+\bottomrule
+\end{longtable}
+
+\section*{四、采纳和人工修改情况}
+当前版本已经采纳的内容包括模板转换、官方版式调整与编译修复。正式提交前，参赛队必须：
+\begin{enumerate}[leftmargin=2.5em]
+\item 逐项复核模型、参数、公式、程序和数值结果；
+\item 补充所有与建模、代码和计算相关的 AI 交互记录；
+\item 说明哪些 AI 建议被采纳、部分采纳或未采纳，以及人工修改的具体内容；
+\item 确保本文件与论文正文中的 AI 标注、参考文献和实际支撑材料完全一致。
+\end{enumerate}
+
+\section*{五、完整性声明}
+本文件仅依据当前可见的排版与格式调整会话生成，不能证明已经覆盖此前所有 AI 使用记录。
+正式提交前应由参赛队根据完整实际记录补充并重新导出为 \texttt{AI工具使用详情.pdf}。
+
+\end{document}

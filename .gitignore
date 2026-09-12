@@ -1,0 +1,44 @@
+# ---- Python / 虚拟环境 ----
+.venv/
+venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# ---- 可复现缓存与二进制产物（不入库；删后按代码重算）----
+code/outputs/cache/
+*.npz
+*.npy
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# ---- 嵌套仓库：program/ 有独立 git（单独提交）----
+program/
+
+# ---- OpenCode（node_modules 与 skills Junction 不入库）----
+.opencode/node_modules/
+.opencode/skills/
+
+# ---- LaTeX 中间产物（全局忽略，保留 PDF）----
+*.aux
+*.out
+*.toc
+*.bbl
+*.blg
+*.xdv
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+
+# ---- 日志 / 临时 / 系统文件 ----
+*.log
+*.tmp
+~$*
+.DS_Store
+Thumbs.db
+desktop.ini

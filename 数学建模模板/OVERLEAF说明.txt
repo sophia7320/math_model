@@ -1,0 +1,5 @@
+1. 将整个 ZIP 上传到 Overleaf，并确认 main.tex 位于项目根目录。
+2. Menu -> Compiler 选择 XeLaTeX。
+3. Main document 选择 main.tex。
+4. 点击 Recompile。首次编译后再编译一次以更新交叉引用。
+5. 不要删除 cumcmthesis.cls、cumcm_official_final.sty 或 figures 文件夹。

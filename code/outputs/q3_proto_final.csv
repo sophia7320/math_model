@@ -1,0 +1,10 @@
+﻿实验,参数,总费用/万元
+margin,0.000,1339.1
+margin,0.005,1339.4
+margin,0.010,1339.7
+margin,0.020,1341.2
+margin,0.030,1343.6
+hedge,lam=0.5 base,1339.1
+hedge,lam=0.5 hedge,1319.8
+hedge,lam=1.0 base,1361.6
+hedge,lam=1.0 hedge,1318.0

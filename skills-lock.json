@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "skills": {
+    "1start-mathmodel": {
+      "source": "jihe520/MathModelAgent",
+      "sourceType": "github",
+      "skillPath": "skills/1start-mathmodel/SKILL.md",
+      "computedHash": "7c66363a7ca6ce9a8bed61883d6cfa679d7233a6aec2194205bb418523393c1c"
+    },
+    "2analysis-modeling": {
+      "source": "jihe520/MathModelAgent",
+      "sourceType": "github",
+      "skillPath": "skills/2analysis-modeling/SKILL.md",
+      "computedHash": "f0d589a251af27d042794b9d264e3bae7ef2b6e02b201347e9cc7e3631f5db97"
+    },
+    "3coding-visual": {
+      "source": "jihe520/MathModelAgent",
+      "sourceType": "github",
+      "skillPath": "skills/3coding-visual/SKILL.md",
+      "computedHash": "ac43ad6504f09151aa71ac885c2a278161bcac1566b5b8e19d80341f034529c0"
+    },
+    "4drawio": {
+      "source": "jihe520/MathModelAgent",
+      "sourceType": "github",
+      "skillPath": "skills/4drawio/SKILL.md",
+      "computedHash": "ac578256cd9bcc3c87937a13dbcfc4683423ad0ef1091d9411b98abc95719af8"
+    },
+    "5writing": {
+      "source": "jihe520/MathModelAgent",
+      "sourceType": "github",
+      "skillPath": "skills/5writing/SKILL.md",
+      "computedHash": "30e101b827de49f3c32874d8d2d0cca9c8679b9a3b951dff379e452441556fc8"
+    },
+    "6verity": {
+      "source": "jihe520/MathModelAgent",
+      "sourceType": "github",
+      "skillPath": "skills/6verity/SKILL.md",
+      "computedHash": "2e5045f4c14a2a55a2353a1d72a45e44f81e22f0496425536ee07302c877764a"
+    },
+    "_references": {
+      "source": "jihe520/MathModelAgent",
+      "sourceType": "github",
+      "skillPath": "skills/_references/SKILL.md",
+      "computedHash": "95b8da4e46bb1b84ee79d14a15f62ab9099c869603752241f053866f8a74b0fd"
+    },
+    "doctor": {
+      "source": "jihe520/MathModelAgent",
+      "sourceType": "github",
+      "skillPath": "skills/doctor/SKILL.md",
+      "computedHash": "5209ba1690b28b15be874ef3078018e1b34bea8fe986b6b7149d57bdf2d1533f"
+    },
+    "mathmodel-figure-templates": {
+      "source": "jihe520/sci-box",
+      "sourceType": "github",
+      "skillPath": "skills/scibox-figure/SKILL.md",
+      "computedHash": "241280fd8e027117f56835baef50c0a6b5bd37baeacf69f9ca2850fc52128d2c"
+    },
+    "scibox-diagram": {
+      "source": "jihe520/sci-box",
+      "sourceType": "github",
+      "skillPath": "skills/scibox-diagram/SKILL.md",
+      "computedHash": "48a2f4127f636bc1769ec2bee73578a091940508c46529c59fe6f7fb7910faca"
+    },
+    "sympy": {
+      "source": "k-dense-ai/scientific-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/sympy/SKILL.md",
+      "computedHash": "2f65c8d03fbf0021c72e8ea5cf598badacfddb81f87311098144538af58d6cd5"
+    },
+    "typst-author": {
+      "source": "jihe520/MathModelAgent",
+      "sourceType": "github",
+      "skillPath": "skills/typst-author/SKILL.md",
+      "computedHash": "d7becdb3d57e552964942c8a2a079529d4c73a24b3860767b6091c98f9809b50"
+    }
+  }
+}

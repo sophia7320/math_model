@@ -1,0 +1,634 @@
+% !TeX program = xelatex
+% !TeX encoding = UTF-8
+\documentclass[withoutpreface,bwprint]{cumcmthesis}
+% 兼容旧版 TeX Live/MiKTeX：正文不依赖 xurl、mathtools、makecell。
+% URL 功能由模板类内置的 url/hyperref 提供。
+% 电子版提交：不含承诺书和编号页，第一页为摘要专用页。
+% 纸质版须另行使用组委会当年发布的承诺书和编号专用页。
+
+
+\newcommand{\papertitlemain}{禁渔与多重压力下长江鱼类生态系统的时空演化}
+\newcommand{\papertitlesub}{基于七节点洄游网络、双鲟分阶段与三营养级动力学模型}
+\title{\papertitlemain：\papertitlesub}
+\tihao{A}
+\baominghao{}
+\schoolname{}
+\membera{}
+\memberb{}
+\memberc{}
+\supervisor{}
+\yearinput{2026}
+\monthinput{08}
+\dayinput{03}
+
+\hypersetup{
+  pdftitle={禁渔与多重压力下长江鱼类生态系统的时空演化},
+  pdfsubject={2026 年全国大学生数学建模竞赛 A 题论文},
+  pdfkeywords={长江十年禁渔, 时空迁移网络, 分阶段种群模型, 非线性动力学, 外来种治理},
+  pdfcreator={XeLaTeX}
+}
+% 允许较长网址在可断点处伸缩换行，无需额外安装 xurl 宏包。
+\Urlmuskip=0mu plus 1mu
+
+
+% 2026 年官方格式规范的刚性要求：A4 纸、四边页边距至少 2.5 cm、
+% 摘要专用页从第 1 页起编号、正文不设目录、电子版不含承诺书和编号页。
+% cumcmthesis 类已设置 A4 纸与 25 mm 页边距；本文保持默认黑白、无页眉，页码居中。
+\pagestyle{plain}
+\pdfstringdefDisableCommands{\def\thinspace{ }}
+\makeatletter
+\renewcommand*{\mcm@cap@keywordsname}{关键词}
+\makeatother
+\newcommand{\YTH}[1]{\textbf{#1}}
+\newcommand{\questionconclusion}[1]{%
+  \par\medskip\noindent\textbf{本问结论：}#1\par\medskip}
+
+\newcommand{\R}{\mathbb{R}}
+\DeclareMathOperator{\clip}{clip}
+
+% 最终推荐样式：以官方兼容版为结构基础，采用往年优秀论文常见的黑白学术版式。
+% 只优化标题层级、行距、图表题注与页面节奏，不改变 A4、25 mm 页边距、
+% 摘要首页、无目录、匿名与连续页码等刚性要求。
+\usepackage{cumcm_official_final}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+针对长江十年禁渔背景下资源恢复、洄游阻隔、珍稀物种保护、食物链稳定和外来种风险五类问题，本文构建“证据账本—状态模型—观测校验—策略评分”的统一框架。首先，将浮游植物、浮游动物、水生植物、底栖动物与四大家鱼纳入含 Holling II 摄食的八维动力学系统，并使七节点有向迁移生成矩阵实际进入积分。其次，分别建立中华鲟幼体—成体模型、长江鲟幼体—亚成体—成体模型和猎物—长江江豚模型，避免用同一“鲟类”参数替代不同生活史。再次，利用 Hastings--Powell 三营养级系统及 Jacobian 特征值、峰间期和最大 Lyapunov 指数交叉识别稳定共存、周期振荡与混沌。最后，将外来入侵种设为动态竞争状态，与废水、塑料和工程阻隔一同进入固定基准恢复得分。
+
+十年无量纲情景演算显示：持续捕捞下四大家鱼总指数变化为 $-91.8\%$，仅禁渔为 $+1.9\%$，禁渔叠加生境修复为 $+39.4\%$；连通修复使上游终点相对阻隔情景提高 $19.3\%$。综合治理较仅禁渔使中华鲟、长江鲟和长江江豚终点分别提高 $46.0\%$、$57.0\%$ 和 $9.3\%$。仅禁渔时外来种终点较持续捕捞增加 $579.4\%$，定向治理可较仅禁渔降低 $51.8\%$。稳定、周期、混沌参考组的最大 Lyapunov 指数分别为 $-0.03699$、$-0.0011$ 和 $0.01015$。留一年外部校验的归一化误差为 $0.099$；512 组联合参数下恢复得分的 $5\%$--$95\%$ 分位区间为 $73.0$--$100.0$，中位数为 $84.4$。结果表明，禁渔是必要的压力移除手段，但恢复上限由连通、栖息地、减污和外来种治理联合决定。所有数值结论均为可复现的情景结果，不是实际个体数、监测事实或经验因果效应。
+
+\keywords{长江十年禁渔；时空迁移网络；分阶段种群模型；非线性动力学；外来种治理}
+\end{abstract}
+
+% 2026 年官方规范明确要求正文不放目录，故保留注释状态。
+% \tableofcontents
+
+\section{问题重述与研究思路}
+
+\subsection{五个问题的共同核心}
+
+原题从浮游生物与四大家鱼、鲟类与江豚、简单食物链、三层食物链非线性动力学、多重人类压力与外来种五个层次提问。这五问不是孤立的：捕捞改变鱼类死亡率，鱼类通过摄食反作用于资源层；工程阻隔改变迁移与自然补充；废水和塑料同时影响环境容量和死亡率；禁渔又可能释放外来种。因此，我们用一组共享压力参数连接各子模型，而不用五套互不相关的曲线拟合。\AIassistmark
+
+本文的中心论点是：十年禁渔能够去除直接捕捞压力，但鱼类生态恢复的速度与上限由通道连通、栖息地质量、基础资源和多重非捕捞压力共同决定，因而政策需从“单一禁渔”转向“禁渔＋连通＋生境＋减污＋外来种治理”的组合策略。
+
+\subsection{信息纠错与建模边界}
+
+原题背景中含有与后续官方监测不一致的叙述。例如，2025 年公报仍表述未监测到中华鲟、长江鲟自然繁殖，因而本文不把“自然繁殖群体已重现”当作校准目标；2025 年长江江豚专项调查给出约 1426 头，也不与题干中更早的约 1240 头混用\cite{report2025}。这一纠错不改变原题的建模任务，但会改变对当前生态状态的解释。
+
+\begin{table}[H]
+\centering
+\caption{原题五问与子模型、核心输出的映射}
+\label{tab:question-map}
+\small
+\begin{tabularx}{\textwidth}{>{\centering\arraybackslash}p{0.07\textwidth} p{0.39\textwidth} X}
+\toprule
+\YTH{题问} & \YTH{子模型} & \YTH{核心输出} \\
+\midrule
+1 & 资源层—四大家鱼八维模型；七节点空间迁移 & 资源与四鱼时序、区域终点、禁渔与生境修复差异 \\
+2 & 中华鲟二阶段、长江鲟三阶段、猎物—江豚模型 & 种群状态指数、自然补充、综合治理收益 \\
+3 & 基础层—中间层—顶级层食物链 & 营养级耗散、承载力改变与食物链反应 \\
+4 & Hastings--Powell 系统与非线性诊断 & 稳定共存、周期、混沌；分岔图与 Lyapunov 指数 \\
+5 & 本土鱼—外来种—资源模型；固定基准得分 & 多压力比较、外来种释放效应、组合治理排序 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{fig01.pdf}
+\caption{长江鱼类生态时空动力学系统框架。左侧为七节点迁移网络，右侧为营养层级与捕捞、废水、塑料、工程阻隔和外来种五类压力入口。箭头表示聚合节点间的可交换关系，不代表真实地图尺度。}
+\label{fig:framework}
+\end{figure}
+
+\section{数据、证据分级与模型假设}
+
+\subsection{数据账本与证据类型}
+
+我们将输入分为四类：（i）官方直接观测值；（ii）根据官方同比或倍数关系反推的派生值；（iii）同行评议文献中的效应量；（iv）模型演算值。证据类型在 CSV 账本、图注和正文中均保留。本文不用派生值替代实测，也不用情景结果替代监测事实。\AIassistmark
+
+2022--2025 年官方资料表明，长江干流单位资源量、四大家鱼卵苗量和优良水质断面比例总体向好\cite{report2022,report2023,report2024,report2025}。2025 年干流单位资源量为 $2.4\,\mathrm{kg}$，四大家鱼监利断面卵苗量为 $94.8$ 亿粒（尾），2021--2025 年累计监测到土著鱼类 351 种\cite{report2025}。对 57 个河段的文献比较给出禁渔后鱼类生物量中位变化 $+209\%$、丰富度 $+13\%$\cite{xiong2026}；赤水河四河段的 CPUE 增幅范围为 $140\%$--$210\%$\cite{liu2023}。这些文献量用于检查方向和数量级，不用于强制拟合每个模型参数。
+
+\subsection{基本假设}
+
+\begin{enumerate}[label=\arabic*.,leftmargin=2.5em]
+\item 以年为长时间尺度，季节繁殖和洄游用周期函数表示；不解析单次洪水或突发污染事件。
+\item 状态变量经基准尺度归一化，其值为相对状态指数，不是实际个体数、尾数或生物量。
+\item 捕捞、污染、塑料和外来种压力在单一情景内为常量；组合情景通过同时改变多个参数表示。
+\item 七个节点是流域空间聚合单元，节点内均匀；迁移生成矩阵保守总量，出生与死亡由局部方程处理。
+\item 人工放流直接进入鲟类幼体方程，但不计入自然补充通量；“未监测到自然繁殖”不等同于数学上绝对为零。
+\item 参数无法从公开汇总数据唯一识别时，将其标为情景参数并给出区间，不称为经验估计。
+\end{enumerate}
+
+\begin{table}[H]
+\centering
+\caption{核心观察指标及其用途}
+\label{tab:indicators}
+\small
+\begin{tabularx}{\textwidth}{p{0.25\textwidth} >{\centering\arraybackslash}p{0.16\textwidth} >{\centering\arraybackslash}p{0.14\textwidth} X}
+\toprule
+\YTH{指标} & \YTH{时间} & \YTH{证据类型} & \YTH{建模用途} \\
+\midrule
+干流单位资源量 & 2020--2025 & 官方／派生 & 年度方向校验，不与 CPUE 混用 \\
+四大家鱼卵苗资源量 & 2020--2025 & 官方／派生 & 自然补充方向和年际波动参考 \\
+I--III 类水质断面占比 & 2022--2025 & 官方 & 污染压力的变化方向 \\
+土著鱼类种数 & 2022--2025 & 官方 & 年度值与累计值分开，仅作外部支持 \\
+长江江豚数量 & 2017、2022、2025 & 官方 & 江豚指数趋势校验，不用于反推实际头数 \\
+鱼类生物量与 CPUE 效应 & 禁渔前后 & 同行评议 & 检查禁渔效应的正方向和范围 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{fig02.pdf}
+\caption{官方观测与派生年序列。实心符号为公报直接值，空心符号为依据公报倍数或同比关系反推的派生值。年度土著鱼类种数与多年累计种数不在同一序列中拟合。}
+\label{fig:official-data}
+\end{figure}
+
+\subsection{符号与统一压力参数}
+
+\begin{table}[H]
+\centering
+\caption{主要符号}
+\label{tab:symbols}
+\small
+\begin{tabularx}{0.9\textwidth}{>{\centering\arraybackslash}p{0.23\textwidth} X >{\centering\arraybackslash}p{0.18\textwidth}}
+\toprule
+\YTH{符号} & \YTH{含义} & \YTH{取值域} \\
+\midrule
+$P,Z,A,B$ & 浮游植物、浮游动物、水生植物、底栖动物指数 & $\R_{\ge 0}$ \\
+$F_i$ & 青鱼、草鱼、鲢鱼、鳙鱼第 $i$ 种状态指数 & $\R_{\ge 0}$ \\
+$Q$ & 七节点迁移生成矩阵，行和为零 & $\R^{7\times 7}$ \\
+$H,c$ & 栖息地质量与连通度 & $[0,1]$ \\
+$f,q,w,v$ & 捕捞、污染、塑料、外来种压力 & $\R_{\ge 0}$ \\
+$J_C,A_C$ & 中华鲟幼体、成体指数 & $\R_{\ge 0}$ \\
+$J_Y,S_Y,A_Y$ & 长江鲟幼体、亚成体、成体指数 & $\R_{\ge 0}$ \\
+$N,D$ & 猎物鱼指数和长江江豚指数 & $\R_{\ge 0}$ \\
+$x,y,z$ & 三营养级的基础层、中间层、顶级层 & $\R_{\ge 0}$ \\
+$V$ & 外来入侵种状态指数 & $\R_{\ge 0}$ \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{问题一：资源层、四大家鱼与时空迁移}
+\renewcommand{\theequation}{3.\arabic{equation}}\setcounter{equation}{0}\renewcommand{\theHequation}{3.\arabic{equation}}
+
+\subsection{资源层与四大家鱼耦合方程}
+
+定义 Holling II 摄食函数\cite{holling1959}
+\begin{equation}
+G(R,C;a,h)=\frac{aRC}{h+R}.\label{eq:holling}
+\end{equation}
+其中 $R$ 为资源，$C$ 为消费者，$a$ 为摄食强度，$h$ 为半饱和常数。资源层方程写为
+\begin{align}
+\dot P&=r_P P\left(1-\frac{P}{K_P}\right)+I(q)-G(P,Z;a_{ZP},h_{ZP})-G(P,F_3;a_3,h_3),\label{eq:P}\\
+\dot Z&=r_Z Z\left(1-\frac{Z}{K_Z}\right)+\eta_ZG(P,Z;a_{ZP},h_{ZP})-G(Z,F_4;a_4,h_4),\label{eq:Z}\\
+\dot A&=r_A A\left(1-\frac{A}{K_A}\right)-G(A,F_2;a_2,h_2),\label{eq:A}\\
+\dot B&=r_B B\left(1-\frac{B}{K_B}\right)-G(B,F_1;a_1,h_1).\label{eq:B}
+\end{align}
+并以 $K_R=K_R^0H(1-0.72q)$ 表示污染和栖息地对容量的共同影响。$I(q)$ 仅表示低水平营养输入，在高污染下不保留单调促进作用。四大家鱼方程为
+\begin{equation}
+\dot F_i=\eta_iG(R_i,F_i;a_i,h_i)+\rho_iHs(t)F_i-
+(\mu_i+f+\alpha_q q+\alpha_w w+\alpha_v v)F_i,\label{eq:fish}
+\end{equation}
+其中 $(R_1,R_2,R_3,R_4)=(B,A,P,Z)$，$s(t)=1+0.42\sin[2\pi(t-0.25)]$。这一结构明确体现鲢鱼滤食浮游植物、鳙鱼滤食浮游动物、草鱼摄食水生植物、青鱼摄食底栖生物的互补性，也修复了只给 $P$ 和 $Z$ 写独立 Logistic 方程而没有 $P\to Z$ 摄食耦合的问题。\AIassistmark
+
+\subsection{七节点迁移生成矩阵}
+
+以海口、下游、中游、上游、库区、鄱阳湖、洞庭湖为节点，对每种鱼的节点状态记为
+$\boldsymbol F_i=(F_{i1},\ldots,F_{i7})^{\mathsf T}$。对有向边 $r\to s$ 设迁移率 $q_{rs}\ge 0$，并令
+\begin{equation}
+q_{rr}=-\sum_{s\ne r}q_{rs},\qquad \sum_{s=1}^{7}q_{rs}=0.\label{eq:generator}
+\end{equation}
+因此对列向量状态，迁移项为 $Q^{\mathsf T}\boldsymbol F_i$，且
+$\boldsymbol 1^{\mathsf T}Q^{\mathsf T}\boldsymbol F_i=0$，即纯迁移保守总量。空间方程为
+\begin{equation}
+\dot{\boldsymbol F}_i=L_i(\boldsymbol F_i;H_r)+\sigma(t)Q^{\mathsf T}\boldsymbol F_i,
+\qquad
+\sigma(t)=0.72+0.28\sin^2[2\pi(t-0.18)].\label{eq:spatial}
+\end{equation}
+工程阻隔情景降低海口—下游、中游—上游、上游—库区及河湖连通边权；连通修复情景提高相同边权并同步提升对应节点的栖息地系数。
+
+\subsection{情景设置与问题一结果}
+
+所有情景使用相同初值、积分时间和容差。“持续捕捞”的捕捞死亡率为 $0.280$；“仅禁渔”的残余捕捞死亡率为 $0.035$；“禁渔＋生境”同时将栖息地质量从 $0.80$ 提升至 $0.94$，并降低污染、塑料和外来种压力。这些是情景参数，不是对现实死亡率的点估计。
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.98\textwidth]{fig03.pdf}
+\caption{资源层与四大家鱼的十年情景动力学。各情景使用相同初值；线条为无量纲状态指数，不是监测尾数。}
+\label{fig:fish-dynamics}
+\end{figure}
+
+在持续捕捞情景下，四大家鱼总指数十年变化为 $-91.8\%$；去除主要捕捞死亡后，仅禁渔情景变化为 $+1.9\%$。其增幅低于线性外推的直觉，原因是资源反馈和基础死亡使种群逐步趋近新平衡。当生境容量、减污和外来种压力同时改善时，十年变化达 $+39.4\%$。因此，在本参数范围内，恢复上限受基础资源和栖息地限制，而不只受捕捞控制。
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.92\textwidth]{fig04.pdf}
+\caption{七节点空间终点与连通修复增益。“增益”以工程阻隔情景为分母；迁移可使局部节点出现再分配下降，不应被解释为全流域损失。}
+\label{fig:connectivity}
+\end{figure}
+
+连通修复并不使所有节点终点同比例增加，因为迁移本质上是空间再分配。上游在阻隔情景中更受限，连通修复使其十年终点相对提高 $19.3\%$；库区与通江湖泊也得益，而中下游的部分生物量向洄游通道上游输出。这正是将“时空网络”实际放入方程后才能得到的区域差异。
+
+\questionconclusion{禁渔显著降低四大家鱼的直接捕捞死亡，但仅禁渔的十年恢复受资源层和栖息地限制；生境修复与连通恢复能同时提升总量上限并改善上游补充。}
+
+\section{问题二：中华鲟、长江鲟与长江江豚}
+\renewcommand{\theequation}{4.\arabic{equation}}\setcounter{equation}{0}\renewcommand{\theHequation}{4.\arabic{equation}}
+
+\subsection{双鲟分离的分阶段模型}
+
+中华鲟具有海河洄游生活史，用幼体 $J_C$ 与成体 $A_C$ 两个阶段聚合；长江鲟的淡水生活史用幼体 $J_Y$、亚成体 $S_Y$、成体 $A_Y$ 三个阶段聚合。两者均不仅用“顶级捕食者”的营养级标签替代种群过程。中华鲟模型为
+\begin{align}
+\dot J_C&=\frac{\beta_CcHA_C}{h_C+A_C}+u_C(t)-\gamma_CJ_C-d_{JC}J_C,\label{eq:JC}\\
+\dot A_C&=\gamma_CJ_C-[\mu_C+\omega_Cf+\xi_C(1-c)+\zeta_Cq]A_C.\label{eq:AC}
+\end{align}
+长江鲟模型为
+\begin{align}
+\dot J_Y&=\frac{\beta_Yc_FHA_Y}{h_Y+A_Y}+u_Y(t)-\gamma_{Y1}J_Y-d_{JY}J_Y,\label{eq:JY}\\
+\dot S_Y&=\gamma_{Y1}J_Y-\gamma_{Y2}S_Y-d_{SY}S_Y,\label{eq:SY}\\
+\dot A_Y&=\gamma_{Y2}S_Y-[\mu_Y+\omega_Yf+\xi_Y(1-c_F)+\zeta_Yq]A_Y.\label{eq:AY}
+\end{align}
+其中 $c_F$ 表示淡水纵向连通，$u_C,u_Y$ 为人工放流。自然补充严格定义为方程中的第一项，不含放流。因而，可同时出现“状态指数因放流而上升”与“自然繁殖仍弱”，这与官方监测的口径是一致的。\AIassistmark
+
+\subsection{猎物—长江江豚模型}
+
+设 $N$ 为小型猎物鱼状态，$D$ 为长江江豚状态，取
+\begin{align}
+\dot N&=r_NN\left(1-\frac{N}{K_NH(1-0.58q)}\right)-\frac{a_NND}{h_N+N}-\omega_NfN,\label{eq:prey}\\
+\dot D&=\eta_D\frac{a_NND}{h_N+N}-[\mu_D+\omega_Df+\xi_D(1-H)+\zeta_Dq+\psi_Dw]D.\label{eq:porpoise}
+\end{align}
+这一结构将禁渔的两条路径分开：直接降低误捕和捕捞压力，以及通过猎物恢复间接改善食物供给。江豚输出始终为归一化状态，不把 2017、2022 和 2025 年的官方头数直接拟合到方程中。
+
+在仅禁渔情景下，中华鲟、长江鲟和长江江豚终点分别为 $0.175$、$0.205$ 和 $0.359$。当连通、栖息地、减污、放流和外来种控制组合施加时，相比仅禁渔，三者终点分别增加 $46.0\%$、$57.0\%$ 和 $9.3\%$。双鲟的自然补充对连通修复的反应强于纯状态指数，说明对珍稀洄游物种而言，“能够存活”与“能够完成自然生活史”是两个不同的管理目标。
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.95\textwidth]{fig05.pdf}
+\caption{中华鲟、长江鲟与长江江豚的情景终点。实线为种群状态指数；鲟类虚线为自然补充通量，人工放流不计入自然补充。}
+\label{fig:sturgeon-porpoise}
+\end{figure}
+
+\questionconclusion{对中华鲟和长江鲟必须分离建模并单独报告自然补充；禁渔能降低死亡压力，但连通与栖息地恢复是重启自然生活史的关键。长江江豚受猎物恢复和非捕捞压力共同控制，因而不应仅用禁渔年数解释其变化。}
+
+\section{问题三：简化三营养级食物链}
+\renewcommand{\theequation}{5.\arabic{equation}}\setcounter{equation}{0}\renewcommand{\theHequation}{5.\arabic{equation}}
+
+\subsection{从多物种网络到三个功能营养层}
+
+原题要求给出“基础食物链—中间食物链—顶级食物链”的简化模型。为了不把简化误作真实物种清单，我们将黑藻、浮游植物和其他初级生产者聚合为基础层 $x$，将四大家鱼等草食性和杂食性鱼类聚合为中间层 $y$，将对中间层有净捕食作用的高营养级功能群聚合为顶级层 $z$。中华鲟和长江鲟在问题二中仍保留独立生活史模型，不由 $z$ 替代。
+
+三营养级方程采用 Hastings--Powell 型结构\cite{hastings1991}：
+\begin{align}
+\dot x&=x\left(1-\frac{x}{K}\right)-\frac{a_1xy}{1+b_1x},\label{eq:hp-x}\\
+\dot y&=\frac{a_1xy}{1+b_1x}-\frac{a_2yz}{1+b_2y}-d_1y,\label{eq:hp-y}\\
+\dot z&=\frac{a_2yz}{1+b_2y}-d_2z.\label{eq:hp-z}
+\end{align}
+其中基础层承载力 $K$ 集中表示生境面积、水质、初级生产和水文节律的综合影响。禁渔主要通过降低中间层与顶级层的额外捕捞死亡使系统从低密度吸引域中移出。但当基础层 $K$ 持续上升或波动时，富营养化并不一定只带来更高的平衡量，还可能把系统推过稳定边界\cite{may1977}。\AIassistmark
+
+\subsection{禁渔对食物链的机制性预测}
+
+方程\eqref{eq:hp-z}给出三个层面的预测。第一，当中间层捕捞死亡降低时，$y$ 先增加，并通过摄食压低 $x$，形成下行的营养级联动。第二，顶级层恢复后对 $y$ 形成制约，可减弱中间层过度增长。第三，若非捕捞压力使基础层承载力或摄食效率越过分岔阈值，鱼类数量增加不再等价于生态状态单调改善。
+
+\questionconclusion{简化食物链支持“禁渔使中间层恢复，顶级层通过营养级联动回复”的基本预测，同时表明恢复不是每一营养级的单调同步上升；基础层承载力和摄食反馈会决定系统趋向平衡、周期还是更复杂的吸引子。}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.98\textwidth]{fig06.pdf}
+\caption{三营养级系统的稳定共存、周期振荡与混沌参考情景。上排为去过渡后时序，下排为基础层—中间层相图，颜色表示顶级层。稳定情景用星号显式标出正内部平衡点。}
+\label{fig:three-trophic}
+\end{figure}
+
+\section{问题四：稳定、周期与混沌的交叉诊断}
+\renewcommand{\theequation}{6.\arabic{equation}}\setcounter{equation}{0}\renewcommand{\theHequation}{6.\arabic{equation}}
+
+\subsection{正内部平衡与局部稳定性}
+
+对方程\eqref{eq:hp-z}所对应的系统求正内部平衡 $E^*=(x^*,y^*,z^*)$，令 $J(E^*)$ 为 Jacobian 矩阵。当
+\begin{equation}
+\max_i\operatorname{Re}\lambda_i\{J(E^*)\}<0\label{eq:local-stability}
+\end{equation}
+时，平衡点局部渐近稳定。本文稳定参考组 $K=0.55$，所得平衡点三个分量均为正，特征值最大实部为 $-0.04664$，排除了把“顶级层灭绝后的二维平衡”错认为三级稳定共存的可能。
+
+\subsection{周期和混沌判别策略}
+
+对非稳定平衡情景，依次执行：（i）丢弃前 450 个无量纲时间的过渡段；（ii）检测顶级层峰值，若后 10 个峰值的变异系数小于 $10^{-3}$ 且峰间期变异系数小于 $10^{-2}$，判为稳定周期；（iii）用双轨道重标定法\cite{benettin1980}计算最大 Lyapunov 指数
+\begin{equation}
+\lambda_{\max}=\lim_{M\to\infty}\frac{1}{M\Delta t}
+\sum_{k=1}^{M}\ln\frac{\lVert\delta_k\rVert}{\varepsilon}.\label{eq:lyapunov}
+\end{equation}
+并对 $\varepsilon=10^{-6},10^{-7},10^{-8}$ 检查符号一致性。若三组指数均大于 $0.003$，则判为混沌；近零且峰间期稳定则判为周期。这一规则避免只凭“曲线看起来不规则”宣称混沌。\AIassistmark
+
+分岔扫描显示，随 $K$ 增大，内部平衡首先失稳，顶级层的峰值由单值分支转为有限周期分支，随后在更高 $K$ 下形成密集分支。因此，模型同时支持原题提到的稳定周期振荡和长期不可预测混沌，但它们并非任意出现，而是由承载力、摄食强度与死亡率的相对位置决定。
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.96\textwidth]{fig07.pdf}
+\caption{基础层承载力 $K$ 扫描下的顶级层分岔、平衡点最大特征值实部及三类参考情景的最大 Lyapunov 指数。橙色虚线为零稳定边界。}
+\label{fig:stability-boundary}
+\end{figure}
+
+\begin{table}[htbp]
+\centering
+\caption{三类非线性动力学参考情景}
+\label{tab:nonlinear-cases}
+\small
+\begin{tabularx}{0.9\textwidth}{>{\centering\arraybackslash}p{0.16\textwidth} >{\centering\arraybackslash}p{0.11\textwidth} >{\centering\arraybackslash}p{0.16\textwidth} >{\raggedright\arraybackslash}X}
+\toprule
+\YTH{类型} & \YTH{$K$} & \YTH{$\lambda_{\max}$} & \YTH{判定依据} \\
+\midrule
+稳定共存 & $0.55$ & $-0.03699$ & 正内部平衡；Jacobian 特征值实部均为负 \\
+周期振荡 & $0.88$ & $-0.0011$ & 峰值和峰间期稳定；Lyapunov 指数近零 \\
+混沌 & $1.00$ & $0.01015$ & 峰值序列不收敛；三种扰动尺度下 Lyapunov 指数均为正 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\questionconclusion{模型支持三种可区分的长期行为：正的三级共存平衡、稳定周期振荡和对初值敏感的混沌。判定必须同时使用平衡点特征值、峰间期和最大 Lyapunov 指数；仅有外观不规则不足以证明混沌。}
+
+\section{问题五：多重人类压力、外来种与综合治理}
+\renewcommand{\theequation}{7.\arabic{equation}}\setcounter{equation}{0}\renewcommand{\theHequation}{7.\arabic{equation}}
+
+\subsection{废水、塑料与工程阻隔的作用路径}
+
+废水压力 $q$ 同时降低资源容量并增加鱼类慢性死亡；塑料压力 $w$ 主要进入鱼类、猎物和江豚死亡项；工程阻隔一方面降低迁移矩阵的关键边权，另一方面降低鲟类自然补充中的 $c$。这三条路径对应不同机制，不用一个“环境系数”笼统乘在所有状态上。
+
+\subsection{外来种作为独立动态状态}
+
+设 $R$ 为共享资源，$U$ 为本土鱼，$V$ 为外来入侵鱼类，构造
+\begin{align}
+\dot R&=r_RR\left(1-\frac{R}{K_RH(1-\theta_q q)}\right)
+-\frac{a_URU}{h_U+R}-\frac{a_VRV}{h_V+R},\label{eq:resource-invasive}\\
+\dot U&=\eta_U\frac{a_URU}{h_U+R}-(\mu_U+f_U+\xi_q q+\xi_w w)U-\alpha UV,\label{eq:native}\\
+\dot V&=\eta_V\frac{a_VRV}{h_V+R}+r_VV\left(1-\frac{V}{K_V}\right)
+-(\mu_V+f_V+\zeta_q q)V-\beta UV.\label{eq:invasive}
+\end{align}
+禁渔同时降低 $f_U$ 和 $f_V$，所以对外来种也可能有“释放”作用；定向治理则保持较低的 $f_U$ 并提高 $f_V$。该模型不声称适用于所有外来生物，而是回答“当外来种与本土鱼共享资源且也承受捕捞时，禁渔会产生什么结构性后果”。\AIassistmark
+
+\subsection{固定基准恢复得分}
+
+以持续捕捞情景的三类终点向量 $\boldsymbol b$ 为零分基准，以综合治理目标向量 $\boldsymbol g$ 为百分基准，对任一情景 $s$ 定义
+\begin{equation}
+S_s=100\sum_{j=1}^{3}\omega_j
+\clip\left(\frac{x_{sj}-b_j}{g_j-b_j},0,1\right),
+\qquad \sum_{j=1}^{3}\omega_j=1.\label{eq:score}
+\end{equation}
+其中三类终点为本土鱼、双鲟平均与长江江豚，本文取等权。式\eqref{eq:score}在所有图表和不确定性分析中始终使用同一 $\boldsymbol b,\boldsymbol g$，不为每一张图重新做极差归一化。
+
+仅禁渔情景的固定基准得分为 $38.0$，废水、塑料和工程阻隔情景分别为 $23.9$、$30.5$ 和 $23.9$，多压力叠加时仅为 $8.8$。外来种专项治理得分提高至 $69.0$，综合治理按定义为 $100$。这些分数是与固定情景基准的相对距离，不是流域实际“健康百分比”。
+
+外来种结果更能显示单一禁渔的边界：与持续捕捞相比，仅禁渔的外来种终点上升 $579.4\%$；与仅禁渔相比，定向外来种治理使其终点降低 $51.8\%$，同时使本土鱼终点由 $0.050$ 提高到 $0.119$。因此，禁渔执法与外来种定向捕获并不矛盾：前者保护天然渔业资源，后者是以生态风险为目标的精准移除。
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.96\textwidth]{fig08.pdf}
+\caption{多重压力、外来种与综合治理。左：所有情景共享的固定基准恢复得分；中：本土鱼、双鲟和江豚的归一化终点；右：外来种终点指数。}
+\label{fig:multiple-pressure}
+\end{figure}
+
+\questionconclusion{废水、塑料和工程阻隔可以显著削弱禁渔收益，且多压力叠加的影响大于任一单项。禁渔会同时释放与本土鱼共享资源的外来种，因此需在持续禁渔的同时配置外来种监测、风险分级和定向移除。}
+
+\section{模型验证、不确定性与敏感性}
+
+\subsection{方向验证、数量级验证与留一年校验}
+
+验证分为三层。第一层是代码级约束：所有状态有限且非负，迁移生成矩阵行和为零，固定基准得分始终在 $[0,100]$ 内。第二层是方向与数量级：模型给出禁渔较持续捕捞更高的鱼类终点，与 57 河段生物量增加及赤水河 CPUE 增加的文献方向一致\cite{xiong2026,liu2023}；但不强求无量纲状态指数复制不同采样设计的效应百分比。第三层是对口径一致的干流单位资源量年序列做留一年外推，归一化均方根误差为 $0.099$。由于只有少量年度点，该值仅评价趋势外推，不证明政策因果识别。
+
+\subsection{Latin Hypercube 不确定性与 PRCC}
+
+对连通度、栖息地质量、执法强度、污染、塑料和外来种压力给出上下限，在区间内假设独立均匀分布，使用 $n=512$ 的 Latin Hypercube 抽样\cite{mckay1979}。不确定区间为参数方案的分位区间，不是观测量的置信区间。对每个参数与终点得分分别做秩变换，再控制其他参数计算偏秩相关系数（PRCC）\cite{marino2008}。
+
+恢复得分的 $5\%$、中位和 $95\%$ 分位数分别为 $73.0$、$84.4$ 和 $100.0$。PRCC 排序中，连通度为最强正相关项（$0.997$），其次为栖息地质量（$0.949$）和执法强度（$0.882$）；污染为最强负相关项（$-0.750$）。这些系数只说明在本文参数区间和模型结构下的输出敏感度，不是经验因果效应。\AIassistmark
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.96\textwidth]{fig09.pdf}
+\caption{区域水生生物完整性参考与外部校验。明确标注的赤水河和河口数值为公报直接值，其余数值为依据公报图表数字化的近似值；不将其作为模型因果效应。}
+\label{fig:external-evidence}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.96\textwidth]{fig10.pdf}
+\caption{2030 年终点的敏感性与不确定性。左：PRCC；中：主要输出相对各自中位数的 $5\%$--$95\%$ 区间；右：512 组联合参数。颜色为固定基准恢复得分。}
+\label{fig:sensitivity}
+\end{figure}
+
+\section{管理建议、模型评价与局限}
+
+\subsection{从结果到可执行的管理顺序}
+
+\begin{enumerate}[label=\arabic*.,leftmargin=2.5em]
+\item \textbf{禁渔与执法作为底线。}继续维持商业捕捞压力的低水平，且用可比的 CPUE、体长结构和群落均匀度监测执法效果，不只看单次捕获量。
+\item \textbf{优先修复关键连通边。}对海口—下游、中游—上游、上游—库区以及河湖交换通道建立繁殖季连通性指标，把“过鱼设施存在”与“洄游功能有效”分开评估。
+\item \textbf{将双鲟的自然补充设为独立绩效。}中华鲟和长江鲟分别监测，人工放流数量不能替代自然产卵、早期存活和成体回游指标。
+\item \textbf{减污和生境修复并行。}对废水、塑料和底质扰动使用不同指标，避免用综合水质等级掩盖局地慢性压力。
+\item \textbf{对外来种实施风险分级和定向移除。}禁渔水域仍应保留经授权的外来种专项捕获，并防止养殖逃逸和不规范放生。
+\end{enumerate}
+
+\subsection{模型优点}
+
+第一，五问使用共享压力参数和固定评分口径，摘要、正文和图表由同一结果文件生成，减少人工抄录矛盾。第二，七节点迁移矩阵实际进入数值积分，可解释区域再分配。第三，中华鲟和长江鲟保留不同阶段结构，人工放流与自然补充分开。第四，混沌由分岔、特征值和 Lyapunov 指数交叉判别。第五，外来种是可动态恢复和可定向治理的状态，而不是一个不变的扣分项。\AIassistmark
+
+\subsection{局限与结论边界}
+
+第一，公开数据主要是年度汇总值，无法唯一识别所有摄食、迁移和死亡参数；所以本文结果应解释为机制情景，而不是精确种群预报。第二，七节点为空间聚合，没有显式表达水温、流速和每座水工建筑的差异。第三，三营养级是功能群抽象，不适合直接推断某一具体捕食关系。第四，外来种模型代表与本土鱼共享资源的入侵鱼类，不能不加修改地代表巴西龟等不同类群。第五，本文没有识别政策的经验因果效应，也不输出绝灭概率、可捕配额或可直接用于工程调度的阈值。
+
+\section{结论}
+
+本文用一套可运行的时空动力学框架回答了原题五问。对问题一，显式的浮游植物—浮游动物耦合和四大家鱼食性连接表明，禁渔主要去除捕捞死亡，而生境与资源层决定恢复上限；七节点迁移又表明连通修复的收益具有空间异质性。对问题二，双鲟分阶段模型与江豚猎物模型表明，综合治理对自然补充的作用大于单一禁渔。对问题三和四，三营养级系统在不同参数区间内支持正内部稳定共存、周期振荡和混沌，说明鱼类数量上升并不保证食物网动力学始终简单。对问题五，外来种动态证明禁渔可同时释放入侵竞争者，废水、塑料和工程阻隔则会系统性削弱禁渔收益。\AIassistmark
+
+因此，答案不是“禁渔能或不能修复长江”的二元判断，而是：禁渔是生态恢复的必要条件，但不是充分条件。使十年政策收益从鱼类数量恢复转化为生活史、食物网和流域完整性恢复，需要同步恢复关键连通边、保护栖息地、降低慢性污染并定向治理外来入侵种。
+
+
+\section*{人工智能工具使用说明}
+正文中的上标“[AI]”用于标示相应段落的文字组织、模型表述、公式排版或一致性检查曾使用
+ChatGPT（GPT-5.6 Thinking）辅助\cite{chatgpt2026}。核心建模思路、参数选择、数值计算、结果核验与最终取舍由参赛队负责。
+工具名称与版本、具体使用目的、关键交互记录、采纳内容及人工修改情况详见支撑材料《AI工具使用详情.pdf》。
+
+\begin{thebibliography}{99}
+\bibitem{report2025}
+农业农村部长江流域渔政监督管理办公室.
+关于发布《长江流域水生生物资源及生境状况公报（2025年）》的公告[EB/OL].
+\url{https://cjyzbgs.moa.gov.cn/ztzl/202604/t20260401_6482860.htm}, 2026. 访问日期：2026-08-01.
+
+\bibitem{report2022}
+农业农村部长江流域渔政监督管理办公室.
+《长江流域水生生物资源及生境状况公报（2022年）》发布：长江流域水生生物资源量呈恢复态势[EB/OL].
+\url{https://cjyzbgs.moa.gov.cn/gzdt/202310/t20231013_6438150.htm}, 2023. 访问日期：2026-08-01.
+
+\bibitem{report2023}
+农业农村部长江流域渔政监督管理办公室.
+《长江流域水生生物资源及生境状况公报（2023年）》发布[EB/OL].
+\url{https://cjyzbgs.moa.gov.cn/ztzl/202408/t20240812_6460621.htm}, 2024. 访问日期：2026-08-01.
+
+\bibitem{report2024}
+农业农村部长江流域渔政监督管理办公室.
+《长江流域水生生物资源及生境状况公报（2024年）》发布[EB/OL].
+\url{https://cjyzbgs.moa.gov.cn/ztzl/202507/t20250730_6476140.htm}, 2025. 访问日期：2026-08-01.
+
+\bibitem{xiong2026}
+Xiong F, et al. Fishing ban halts seven decades of biodiversity decline in the Yangtze River[J].
+\textit{Science}, 2026. \url{https://doi.org/10.1126/science.adu5160}.
+
+\bibitem{liu2023}
+Liu F, Wang Z, Xia Z, et al. Changes in fish resources 5 years after implementation of the 10-year fishing ban in the Chishui River, the first river with a complete fishing ban in the Yangtze River Basin[J].
+\textit{Ecological Processes}, 2023, 12(1): 51.
+\url{https://doi.org/10.1186/s13717-023-00465-6}.
+
+\bibitem{holling1959}
+Holling C S. Some characteristics of simple types of predation and parasitism[J].
+\textit{The Canadian Entomologist}, 1959, 91(7): 385--398.
+\url{https://doi.org/10.4039/Ent91385-7}.
+
+\bibitem{hastings1991}
+Hastings A, Powell T. Chaos in a three-species food chain[J].
+\textit{Ecology}, 1991, 72(3): 896--903.
+\url{https://doi.org/10.2307/1940591}.
+
+\bibitem{may1977}
+May R M. Thresholds and breakpoints in ecosystems with a multiplicity of stable states[J].
+\textit{Nature}, 1977, 269: 471--477.
+\url{https://doi.org/10.1038/269471a0}.
+
+\bibitem{benettin1980}
+Benettin G, Galgani L, Giorgilli A, et al. Lyapunov characteristic exponents for smooth dynamical systems and for Hamiltonian systems: a method for computing all of them[J].
+\textit{Meccanica}, 1980, 15: 9--20.
+\url{https://doi.org/10.1007/BF02128236}.
+
+\bibitem{mckay1979}
+McKay M D, Beckman R J, Conover W J. A comparison of three methods for selecting values of input variables in the analysis of output from a computer code[J].
+\textit{Technometrics}, 1979, 21(2): 239--245.
+\url{https://doi.org/10.1080/00401706.1979.10489755}.
+
+\bibitem{marino2008}
+Marino S, Hogue I B, Ray C J, et al. A methodology for performing global uncertainty and sensitivity analysis in systems biology[J].
+\textit{Journal of Theoretical Biology}, 2008, 254(1): 178--196.
+\url{https://doi.org/10.1016/j.jtbi.2008.04.011}.
+
+
+\bibitem{chatgpt2026}
+ChatGPT, GPT-5.6 Thinking, OpenAI, 2026-08-03.
+
+\end{thebibliography}
+
+\begin{appendices}
+\renewcommand{\thesubsection}{\Alph{section}.\arabic{subsection}}
+\renewcommand{\theHsubsection}{appendix.\Alph{section}.\arabic{subsection}}
+
+\section{核心参数与取值范围}
+
+表\ref{tab:parameters-1}--\ref{tab:parameters-2}列出对主要结论有直接影响的参数。基准值用于主情景，上下限用于 Latin Hypercube 抽样。“结构文献”表示方程结构来自经典模型，但具体数值仍是本文无量纲情景参数。
+
+\begin{table}[H]
+\centering
+\caption{资源层、网络与保护物种参数}
+\label{tab:parameters-1}
+\small
+\begin{tabularx}{\textwidth}{>{\centering\arraybackslash}p{0.09\textwidth} X >{\centering\arraybackslash}p{0.10\textwidth} >{\centering\arraybackslash}p{0.10\textwidth} >{\centering\arraybackslash}p{0.10\textwidth} >{\centering\arraybackslash}p{0.16\textwidth}}
+\toprule
+\YTH{符号} & \YTH{含义} & \YTH{基准} & \YTH{下限} & \YTH{上限} & \YTH{来源类型} \\
+\midrule
+$r_P$ & 浮游植物内禀增长率 & 1.20 & 0.96 & 1.44 & 情景／文献 \\
+$r_Z$ & 浮游动物内禀增长率 & 0.78 & 0.62 & 0.94 & 情景／文献 \\
+$a_{ZP}$ & 浮游动物摄食浮游植物强度 & 0.48 & 0.34 & 0.62 & Holling 结构 \\
+$f_1$ & 禁渔残余捕捞死亡率 & 0.035 & 0.020 & 0.060 & 政策情景 \\
+$f_0$ & 持续捕捞死亡率 & 0.280 & 0.220 & 0.340 & 政策情景 \\
+$H$ & 栖息地质量 & 0.80 & 0.68 & 0.95 & 情景参数 \\
+$q$ & 污染压力 & 0.060 & 0.020 & 0.140 & 情景参数 \\
+$w$ & 塑料压力 & 0.050 & 0.010 & 0.120 & 情景参数 \\
+$m$ & 节点间基础迁移率 & 0.060 & 0.035 & 0.090 & 情景参数 \\
+$c$ & 洄游通道连通度 & 0.68 & 0.40 & 0.95 & 情景参数 \\
+$\beta_C$ & 中华鲟自然补充尺度 & 0.052 & 0.030 & 0.080 & 情景／文献 \\
+$\gamma_C$ & 中华鲟幼体成熟率 & 0.130 & 0.090 & 0.180 & 情景／文献 \\
+$\beta_Y$ & 长江鲟自然补充尺度 & 0.074 & 0.045 & 0.110 & 情景／文献 \\
+$\gamma_{Y1}$ & 长江鲟幼体转移率 & 0.180 & 0.120 & 0.240 & 情景／文献 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{外来种、三营养级与不确定性参数}
+\label{tab:parameters-2}
+\small
+\begin{tabularx}{\textwidth}{>{\centering\arraybackslash}p{0.09\textwidth} X >{\centering\arraybackslash}p{0.10\textwidth} >{\centering\arraybackslash}p{0.10\textwidth} >{\centering\arraybackslash}p{0.10\textwidth} >{\centering\arraybackslash}p{0.16\textwidth}}
+\toprule
+\YTH{符号} & \YTH{含义} & \YTH{基准} & \YTH{下限} & \YTH{上限} & \YTH{来源类型} \\
+\midrule
+$r_V$ & 外来种内禀增长率 & 0.520 & 0.360 & 0.700 & 情景／文献 \\
+$\alpha$ & 外来种对本土鱼竞争强度 & 0.330 & 0.200 & 0.480 & 情景参数 \\
+$f_V$ & 外来种定向捕获死亡率 & 0.110 & 0.050 & 0.180 & 管理情景 \\
+$K$ & 基础营养层承载力 & 0.80 & 0.40 & 1.20 & Hastings--Powell 结构 \\
+$d_1$ & 中间层死亡率 & 0.400 & 0.320 & 0.480 & Hastings--Powell 结构 \\
+$d_2$ & 顶级层死亡率 & 0.015 & 0.008 & 0.040 & Hastings--Powell 结构 \\
+$E$ & 禁渔执法强度 & 0.850 & 0.600 & 0.980 & 政策情景 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{数值算法与可复现性}
+
+\subsection{数值算法}
+
+局部种群、空间迁移、双鲟、江豚和外来种方程均用 LSODA 积分，设置相对容差 $2\times10^{-8}$、绝对容差 $10^{-10}$。三营养级平衡用非线性方程求根，Lyapunov 指数的双轨道进化用四阶 Runge--Kutta，步长 $0.01$，每 $0.5$ 个时间单位重标定。分岔扫描对 $K\in[0.55,1.05]$ 取 70 个节点，丢弃过渡段后记录顶级层峰值。
+
+\subsection{可复现流程}
+
+随机分析的种子固定为 20260801。项目根目录下执行以下命令即可从数据账本重新生成结果、全中文图件和 PDF：
+\begin{verbatim}
+make clean all
+\end{verbatim}
+单元测试覆盖数据口径、资源摄食方向、迁移守恒、状态非负、双鲟维数分离、外来种释放效应、三类动力学判定、随机复现性、图件数量和中文字形。
+
+\section{情景口径速查}
+
+\begin{table}[H]
+\centering
+\caption{全文情景含义与不应越界的解释}
+\label{tab:scenario-meaning}
+\small
+\begin{tabularx}{\textwidth}{>{\centering\arraybackslash}p{0.17\textwidth} p{0.35\textwidth} X}
+\toprule
+\YTH{情景} & \YTH{参数变化} & \YTH{解释边界} \\
+\midrule
+持续捕捞 & 较高本土与外来种捕捞死亡，较低生境质量 & 反事实对照情景，不代表某一实际年份 \\
+仅禁渔 & 捕捞死亡降低，其他压力只做小幅改善 & 用于隔离捕捞通道，不称为现实政策的唯一效果 \\
+连通修复 & 提高关键迁移边权、河湖交换与栖息地质量 & 不等同于任何单座工程的实际效果 \\
+废水／塑料／工程 & 分别改变容量、慢性死亡或连通 & 为机制压力试验，不是断面级污染预报 \\
+外来种专项治理 & 提高外来种定向捕获，保持本土鱼低捕捞 & 需经物种鉴定、风险评估和管理授权 \\
+综合治理 & 禁渔、连通、生境、减污、放流和外来种治理叠加 & 是目标情景，不是预测 2030 年必然达到的状态 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+
+\section{支撑材料文件列表}
+
+支撑材料压缩包的目录与文件应与表\ref{tab:support-list}逐项一致，用于支撑正文中的模型、结果与结论。
+其中，源程序应能够直接运行并复现主要数值结果；自主查阅数据应附来源说明；较大篇幅的中间结果可放入
+独立目录；人工智能工具的使用情况应另附 PDF 说明文件。
+
+\begin{table}[H]
+\centering
+\caption{支撑材料压缩包文件列表}
+\label{tab:support-list}
+\small
+\begin{tabularx}{\textwidth}{>{\centering\arraybackslash}p{0.09\textwidth} p{0.30\textwidth} X}
+\toprule
+\YTH{序号} & \YTH{文件或目录} & \YTH{内容与用途} \\
+\midrule
+1 & \texttt{src/} & 产生正文全部数值、表格和图件的完整可运行源程序及运行说明 \\
+2 & \texttt{data/} & 自主查阅使用的数据资料、证据账本及数据来源说明 \\
+3 & \texttt{results/} & 参数扫描、中间结果、复现实验输出及较大篇幅图表 \\
+4 & \texttt{AI工具使用详情.pdf} & AI 工具名称与版本、使用目的、关键交互记录、采纳内容及人工修改情况 \\
+5 & \texttt{README.txt} & 软件环境、依赖版本、随机种子和一键复现步骤 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\end{appendices}
+
+\end{document}
