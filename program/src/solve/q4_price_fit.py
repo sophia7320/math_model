@@ -62,9 +62,9 @@ def run_year(p4, p_typ, data, v, days):
         pv0 = q2._hour_to_slots(fc0[D]) / 6.0
         pv1 = qp.hist_forecast_asof(data, D + 1, D) / 6.0
         xh, Eh, _ = q2.plan_horizon(
-            np.concatenate([p_hat, p_hat1]), np.concatenate([load0, load1]),
-            np.concatenate([pv0, pv1]), E, E0, eps=1e-3,
-        )
+                np.concatenate([p_hat, p_hat1]), np.concatenate([load0, load1]),
+                np.concatenate([pv0, pv1]), E, None, eps=1e-3,
+            )
         x, e_day_end = xh[:T], float(Eh[T - 1])
         ex = q2.exec_day_causal(
             p4[D], data["load"][D] / 6.0, pv_act[D] / 6.0, x, E,
@@ -116,9 +116,9 @@ def main():
             pv0 = q2._hour_to_slots(data["fc0"][D]) / 6.0
             pv1 = qp.hist_forecast_asof(data, D + 1, D) / 6.0
             xh, Eh, _ = q2.plan_horizon(
-                np.concatenate([p_hat, p_hat1]), np.concatenate([load0, load1]),
-                np.concatenate([pv0, pv1]), E_state[j], E0, eps=1e-3,
-            )
+                    np.concatenate([p_hat, p_hat1]), np.concatenate([load0, load1]),
+                    np.concatenate([pv0, pv1]), E_state[j], None, eps=1e-3,
+                )
             x, e_day_end = xh[:T], float(Eh[T - 1])
             ex = q2.exec_day_causal(
                 p4[D], data["load"][D] / 6.0, data["pv_act"][D] / 6.0, x, E_state[j],

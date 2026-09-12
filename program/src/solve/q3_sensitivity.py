@@ -21,7 +21,8 @@ from solve import q2
 from solve import q3_proto as qp
 from solve.common import ROOT
 
-BETA = 0.1
+# 统一口径：`qp.load_extended()` 已生成 EWMA h=5 权重（data["EWMA_WU"]），
+# 旧版 β 平滑（U_SMOOTH）已退役，不再设置。
 DAYS = list(range(q2.REPORT_START, q2.N_DAY))
 
 _P = None
@@ -77,8 +78,7 @@ def main():
     pm.init(seed=42, root=str(ROOT))
     log = pm.get_logger("q3-sens")
     t0 = time.time()
-    data = qp.load_extended()
-    data["U_SMOOTH"] = qp.make_smooth_u(data, BETA)
+    data = qp.load_extended()  # 含统一 EWMA 权重（EWMA_WU）
 
     # 每个配置先顺序推导 2 日滚动产生的跨日 SOC；正式日模拟仍可并行，
     # 因为逐日执行被约束到该日自由优化出的计划末端。

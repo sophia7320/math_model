@@ -39,3 +39,6 @@ code/outputs/cache/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ---- CodeGraph 本地索引（不入库）----
+.codegraph/
