@@ -358,30 +358,48 @@ def main():
     top4 = df4.loc[df4["总费用/万元"].idxmin()]
     print(f"阶段4 最优：{top4['配置']} = {top4['总费用/万元']} 万元")
 
-    # ---------- 分半验证（H1: 2–6 月；H2: 7–12 月） ----------
-    half = len(REP) // 2
+    # ---------- 时间留出验证（开发期: 2–6 月；冻结验证期: 7–12 月） ----------
+    # 不能按 334 天机械对半：真正的 7 月 1 日切点是第 150 个报告日。
+    split_at = next(i for i, d in enumerate(REP) if model.dates[d] == "2025-07-01")
     tagged = []
-    for df, dp, de in ((df1, dp1, de1), (df2, dp2, de2), (df4, dp4, de4)):
+    for family, df, dp, de in (
+        ("窗口/EWMA", df1, dp1, de1),
+        ("决策裕度", df2, dp2, de2),
+        ("风险/收缩", df3, dp3, de3),
+        ("组合精扫", df4, dp4, de4),
+    ):
         for i in range(len(df)):
-            tagged.append((df.iloc[i]["配置"], dp[i], de[i]))
-    tagged = pd.DataFrame(tagged, columns=["配置", "dp", "de"])
-    candidates = ["网格 W=7"]
-    for tag in (top2["配置"], top4["配置"]):
-        if tag not in candidates:
-            candidates.append(tag)
-    dyn_tags = [t for t in tagged["配置"] if "动态κ" in t]
-    if dyn_tags:
-        candidates.append(dyn_tags[0])
+            tagged.append((family, df.iloc[i]["配置"], dp[i], de[i]))
+    tagged = pd.DataFrame(tagged, columns=["族", "配置", "dp", "de"])
+
     split_rows = []
-    for tag in candidates:
-        row = tagged[tagged["配置"] == tag].iloc[0]
-        p1 = float(row["dp"][:half].sum() + row["de"][:half].sum()) / 1e4
-        p2 = float(row["dp"][half:].sum() + row["de"][half:].sum()) / 1e4
-        split_rows.append({"配置": tag, "上半年(2-6月)/万元": round(p1, 1),
-                           "下半年(7-12月)/万元": round(p2, 1),
-                           "全年/万元": round(p1 + p2, 1)})
-    split = pd.DataFrame(split_rows)
-    split.to_csv(pm.outputs_dir() / "q2e_tune_split.csv", index=False, encoding="utf-8-sig")
+    for _, row in tagged.iterrows():
+        dev = float(row["dp"][:split_at].sum() + row["de"][:split_at].sum()) / 1e4
+        val = float(row["dp"][split_at:].sum() + row["de"][split_at:].sum()) / 1e4
+        split_rows.append({
+            "族": row["族"], "配置": row["配置"],
+            "开发期(2-6月)/万元": round(dev, 1),
+            "冻结验证期(7-12月)/万元": round(val, 1),
+            "全年描述值/万元": round(dev + val, 1),
+        })
+    holdout = pd.DataFrame(split_rows).sort_values(
+        ["开发期(2-6月)/万元", "冻结验证期(7-12月)/万元"]
+    ).reset_index(drop=True)
+    holdout["开发期选中"] = holdout.index == 0
+    holdout["验证期排名"] = holdout["冻结验证期(7-12月)/万元"].rank(
+        method="min"
+    ).astype(int)
+    selected = holdout.iloc[0]
+    holdout.to_csv(pm.outputs_dir() / "q2e_tune_holdout.csv", index=False,
+                   encoding="utf-8-sig")
+
+    keep = {"网格 W=7", str(selected["配置"]), str(top4["配置"])}
+    split = holdout[holdout["配置"].isin(keep)].copy()
+    split.to_csv(pm.outputs_dir() / "q2e_tune_split.csv", index=False,
+                 encoding="utf-8-sig")
+    print("时间留出验证：开发期选中 {}（开发 {:.1f} 万，冻结验证 {:.1f} 万，验证排名 {}/{}）".format(
+        selected["配置"], selected["开发期(2-6月)/万元"],
+        selected["冻结验证期(7-12月)/万元"], selected["验证期排名"], len(holdout)))
 
     # ---------- 汇总 ----------
     official = df1[df1["配置"] == "网格 W=7"].iloc[0]
@@ -499,9 +517,10 @@ def main():
               "组合 = κ 与光伏裕度 m/小时裕度叠加。"),
     )
     record(
-        "问题二 口径E 参数搜索：分半验证",
+        "问题二 口径E 参数搜索：时间留出验证",
         split,
-        note="上半年 2025-02-01~06-30，下半年 2025-07-01~12-31；用于检查裕度参数的跨期稳健性。",
+        note=("开发期 2025-02-01~06-30 只负责选参，冻结验证期 2025-07-01~12-31 不参与选择；"
+              "全部候选见 code/outputs/q2e_tune_holdout.csv。全年列仅作描述，不用于选参。"),
     )
     record(
         "问题二 口径E 调优配置汇总",
@@ -514,11 +533,13 @@ def main():
     return summary
 
 
-def write_result2_tuned(W: float = 5.0, kappa: float = 1.02, margin: float = 50.0) -> dict:
-    """把调优配置（EWMA h=5 + κ=1.02 + m=50 kW）写入 results/result2.xlsx。
+def write_result2_tuned(W: float = 5.0, kappa: float = 1.015,
+                        margin: float = 50.0) -> dict:
+    """把时间留出选定配置写入 ``results/result2.xlsx``。
 
     流程：EWMA 权重序列 → 逐日（计划用 κ/m 修正后的预测）→ 逐槽因果执行 →
-    备份现官方文件到 code/outputs/result2_W7_backup.xlsx → 写出 + 回读校验 + 报告。
+    备份现官方文件 → 写出 + 回读校验 + 报告。默认参数只由 2–6 月开发期选择，
+    7–12 月作为冻结验证期，不参与选择。
     """
     from solve.q2_adaptive import _verify_result2
 
@@ -552,13 +573,15 @@ def write_result2_tuned(W: float = 5.0, kappa: float = 1.02, margin: float = 50.
 
     cur = RESULTS_DIR / "result2.xlsx"
     if cur.exists():
-        shutil.copy2(cur, pm.outputs_dir() / "result2_W7_backup.xlsx")
-        log.info("旧（W=7）result2 备份 -> {}", pm.outputs_dir() / "result2_W7_backup.xlsx")
+        backup = pm.outputs_dir() / "result2_pre_holdout_backup.xlsx"
+        if not backup.exists():
+            shutil.copy2(cur, backup)
+            log.info("留出验证修正前 result2 备份 -> {}", backup)
     out = q2.write_result2(model.dates, model.price, x_plans, recs, out_name="result2.xlsx")
     checks = _verify_result2(out, df)
     pm.save_outputs(df, "q2e_tuned_daily")
     record(
-        "问题二 口径E（调优：EWMA h=5 + κ=1.02 + m=50）官方 result2 结果与校验",
+        "问题二 口径E（时间留出选定：EWMA h=5 + κ=1.015 + m=50）官方 result2",
         {
             "计划购电费/万元": round(plan / 1e4, 1),
             "紧急购电费/万元": round(emerg / 1e4, 1),
@@ -567,13 +590,15 @@ def write_result2_tuned(W: float = 5.0, kappa: float = 1.02, margin: float = 50.
             **checks,
         },
         note=(
-            "官方 results/result2.xlsx 由调优配置生成：权重为 EWMA（半衰期 5 天）逐日费用标定，"
-            "预测修正 κ=1.02（负荷抬升）、m=50 kW（光伏折扣）；计划 LP 与因果执行与口径 E 相同。"
-            "旧 W=7 版备份 code/outputs/result2_W7_backup.xlsx；复现："
+            "官方 results/result2.xlsx 由时间留出配置生成：2–6 月开发期选择 EWMA 半衰期 5 天、"
+            "κ=1.015（负荷抬升）、m=50 kW（光伏折扣），7–12 月冻结验证不参与选参；"
+            "计划 LP 与因果执行与口径 E 相同。旧 W=7 版仍保留在 "
+            "code/outputs/result2_W7_backup.xlsx，留出修正前版本保留在 "
+            "code/outputs/result2_pre_holdout_backup.xlsx；复现："
             "uv run python -m solve.q2_tune --result2。"
         ),
     )
-    log.info("result2.xlsx（调优）写出完成：{}，总费用 {:.1f} 万元（计划 {:.1f} + 紧急 {:.1f}）",
+    log.info("result2.xlsx（时间留出选定）写出完成：{}，总费用 {:.1f} 万元（计划 {:.1f} + 紧急 {:.1f}）",
              out, (plan + emerg) / 1e4, plan / 1e4, emerg / 1e4)
     return {"plan": plan, "emerg": emerg, "checks": checks, "out": out}
 

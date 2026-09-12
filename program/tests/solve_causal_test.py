@@ -73,7 +73,61 @@ def check_causal_pool() -> None:
         assert int(pool.min()) >= max(14, D - 90)
 
 
+def check_hedge_probability_weights() -> None:
+    """Q2 等概率场景补救成本必须除以场景数。"""
+    captured = {}
+    original = q2.pm.optimize.solve_lp
+
+    class FakeResult:
+        success = True
+        message = ""
+        x = np.zeros(q2.T + 4 * 5 * q2.T)
+
+    def fake_solve(c, **kwargs):
+        captured["c"] = np.asarray(c, dtype=float)
+        return FakeResult()
+
+    q2.pm.optimize.solve_lp = fake_solve
+    try:
+        q2.hedge_day(
+            np.ones(q2.T), np.zeros(q2.T), np.zeros(24),
+            np.zeros((1, 24)), 6000.0,
+            n_scen=4, rng=np.random.default_rng(0),
+        )
+    finally:
+        q2.pm.optimize.solve_lp = original
+
+    c = captured["c"]
+    assert np.allclose(c[:q2.T], 1.0)
+    for s in range(4):
+        base = q2.T + s * 5 * q2.T
+        assert np.allclose(c[base + 4 * q2.T:base + 5 * q2.T], 5.0 / 4.0)
+
+    fc = np.full(24, 100.0)
+    residual = np.full(24, 20.0)  # 预报比实际高 20
+    assert np.allclose(q2._scenario_from_residual(fc, residual), 80.0)
+
+
+def check_publication_residual() -> None:
+    """6:00 残差不得拼入同一历史日 12:00/18:00 的预报。"""
+    n = 20
+    data = {
+        "fc0": np.zeros((n, 24)),
+        "fc6": np.full((n, 24), 6.0),
+        "fc12": np.full((n, 24), 12.0),
+        "fc18": np.full((n, 24), 18.0),
+        "pv_act": np.zeros((n, q2.T)),
+    }
+    expected = qp.fc_slots(data["fc6"][15], 6) / 6.0
+    actual = qp.forecast_residual(data, 15, 6, None)
+    assert np.allclose(actual, expected)
+    # 12:00 以后仍应保持 6:00 发布口径，而不是历史“最新预报”拼接口径。
+    assert not np.allclose(actual[72:108], qp.latest_forecast(data, 15)[72:108] / 6.0)
+
+
 if __name__ == "__main__":
     check_dispatch()
     check_causal_pool()
+    check_hedge_probability_weights()
+    check_publication_residual()
     print("solve_causal_test: PASS")
