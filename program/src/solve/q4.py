@@ -138,7 +138,7 @@ def run_year(data, p4, p_typ, vseq, price_mode="H", storage="2day",
             p_d = price_forecast_d(D, v, p4, p_typ)
             p_d1 = price_forecast_next(D, v, p4, p_typ) if D + 1 < N_DAY else p_d
         load_d = load[D] / 6.0
-        load_fc_d = qp.hist_load_forecast(data, D) / 6.0
+        load_fc_d = qp.hist_load_forecast_asof(data, D, D) / 6.0
         pv_fc_d = q2._hour_to_slots(fc0[D]) / 6.0
 
         if storage == "daily":
@@ -146,8 +146,8 @@ def run_year(data, p4, p_typ, vseq, price_mode="H", storage="2day",
             e_end = float(np.clip(E_plan[-1], E_MIN, E_MAX))
         else:
             D1 = min(D + 1, N_DAY - 1)
-            load_d1 = qp.hist_load_forecast(data, D1) / 6.0
-            pv_fc_d1 = qp.hist_forecast(data, D1) / 6.0
+            load_d1 = qp.hist_load_forecast_asof(data, D + 1, D) / 6.0
+            pv_fc_d1 = qp.hist_forecast_asof(data, D + 1, D) / 6.0
             xh, Eh = plan_horizon(
                 np.concatenate([p_d, p_d1]),
                 np.concatenate([load_fc_d, load_d1]),
@@ -394,7 +394,7 @@ def simulate_day_q3(data, p4, p_typ, vseq, D, price_mode="H", storage="daily",
     """
     p_dec = p4[D] if price_mode == "G" else price_forecast_d(D, vseq[D], p4, p_typ)
     load_kwh = data["load"][D] / 6.0
-    load_fc_kwh = qp.hist_load_forecast(data, D) / 6.0
+    load_fc_kwh = qp.hist_load_forecast_asof(data, D, D) / 6.0
     pv_act_kwh = data["pv_act"][D] / 6.0
     f0 = q2._hour_to_slots(data["fc0"][D])
     ph = qp.hist_forecast(data, D)
@@ -411,8 +411,8 @@ def simulate_day_q3(data, p4, p_typ, vseq, D, price_mode="H", storage="daily",
                   else price_forecast_next(D, vseq[D], p4, p_typ))
         xh, Eh = plan_horizon(
             np.concatenate([p_dec, p_dec1]),
-            np.concatenate([load_fc_kwh, qp.hist_load_forecast(data, D1) / 6.0]),
-            np.concatenate([pv_plan, qp.hist_forecast(data, D1) / 6.0]),
+            np.concatenate([load_fc_kwh, qp.hist_load_forecast_asof(data, D + 1, D) / 6.0]),
+            np.concatenate([pv_plan, qp.hist_forecast_asof(data, D + 1, D) / 6.0]),
             e_start, E0,
         )
         x_plan, E_plan = xh[:T], Eh[:T]

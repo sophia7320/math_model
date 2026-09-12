@@ -73,6 +73,16 @@ def check_causal_pool() -> None:
         assert int(pool.min()) >= max(14, D - 90)
 
 
+def check_two_day_terminal() -> None:
+    """48 小时远端守恒，但首日 24:00 SOC 必须是自由变量而非固定 6000。"""
+    price = np.r_[np.ones(q2.T), np.full(q2.T, 10.0)]
+    load = np.r_[np.zeros(q2.T), np.full(q2.T, 20.0)]
+    pv = np.zeros(2 * q2.T)
+    _x, E, _ = q2.plan_horizon(price, load, pv, 6000.0, 6000.0, eps=1e-6)
+    assert abs(E[-1] - 6000.0) < 1e-7
+    assert abs(E[q2.T - 1] - 6000.0) > 1.0
+
+
 def check_hedge_probability_weights() -> None:
     """Q2 等概率场景补救成本必须除以场景数。"""
     captured = {}
@@ -91,7 +101,7 @@ def check_hedge_probability_weights() -> None:
     try:
         q2.hedge_day(
             np.ones(q2.T), np.zeros(q2.T), np.zeros(24),
-            np.zeros((1, 24)), 6000.0,
+            np.zeros((1, 24)), 6000.0, 6000.0,
             n_scen=4, rng=np.random.default_rng(0),
         )
     finally:
@@ -127,6 +137,7 @@ def check_publication_residual() -> None:
 
 if __name__ == "__main__":
     check_dispatch()
+    check_two_day_terminal()
     check_causal_pool()
     check_hedge_probability_weights()
     check_publication_residual()

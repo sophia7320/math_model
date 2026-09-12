@@ -4,7 +4,8 @@
 - 0:00 计划：组合预测 λ·官方f0 + (1−λ)·历史口E，λ=0.7；历史权重参数平滑 β=0.1
 - 6/12/18 调整：同组合口径的最新预报重优化未执行时段（6:00 决策 [6,12)，
   12:00 决策 [12,18)，18:00 决策 [18,24)）
-- 6:00/12:00 调整叠加场景对冲（残差块仅取自目标日之前，10 情景）
+- 6:00/12:00 调整叠加场景对冲（残差块仅取自目标日之前，40 情景）
+- 储能：2 日预测窗口，每日只执行首日；日末 SOC 自由并跨日传递，48 小时远端回到 6000 kWh
 - 执行：逐槽因果（q2.exec_segment_causal，段末储能跟踪规划轨迹），缺口按 5 倍交易时刻电价紧急购电
 - 结算：费用 = Σ[p·x_adj + 0.5·p·|x_plan − x_adj|] + 5·Σ p·e
 
@@ -51,8 +52,11 @@ def record(section: str, data, note: str = "") -> None:
     pm.record_result(section, data, note=note)
 
 
-def _day_result(data, D, **kw):
-    r = qp.simulate_day_rt_hedge(data, D, LAM, adj_lam=ADJ_LAM, n_scen=N_SCEN, seed=SEED, **kw)
+def _day_result(data, D, e_start, **kw):
+    r = qp.simulate_day_rt_hedge(
+        data, D, LAM, adj_lam=ADJ_LAM, n_scen=N_SCEN, seed=SEED,
+        e_start=e_start, **kw,
+    )
     return r
 
 
@@ -60,19 +64,23 @@ def run_main(data):
     """主方案全年模拟，返回明细。"""
     days = list(range(DAY_START, DAY_START + N_Q3))
     out = {k: np.zeros((N_Q3, T)) for k in ("xp", "xa", "c", "d", "E", "e")}
+    out["E_start"] = np.zeros(N_Q3)
     rows = []
     t0 = time.time()
+    E = float(qp.E0)
     for i, D in enumerate(days):
-        r = _day_result(data, D)
+        r = _day_result(data, D, E)
         out["xp"][i] = r["x_plan"]; out["xa"][i] = r["x_final"]
         out["c"][i] = r["c"]; out["d"][i] = r["d"]
         out["E"][i] = r["E_exec"]; out["e"][i] = r["e"]
+        out["E_start"][i] = r["E_start"]
         rows.append({"日期": data["dates"][D], "计划费/元": r["plan_cost"],
                      "调整净额/元": r["adjust_net"], "紧急费/元": r["emerg"],
                      "总费用/元": r["total"], "紧急量/kWh": float(r["e"].sum()),
                      "调整量/kWh": float(np.abs(r["x_final"] - r["x_plan"]).sum()),
                      "场景最大日序号": int(r.get("scenario_max_day", -1)),
                      "场景数": int(r.get("scenario_count", 0))})
+        E = float(r["E_end"])
         if (i + 1) % 50 == 0:
             print(f"  主方案 {i + 1}/{N_Q3} 天，用时 {time.time() - t0:.0f}s")
     return {k: v for k, v in out.items()}, pd.DataFrame(rows)
@@ -83,10 +91,12 @@ def run_baseline(data, tag, **kw):
     days = list(range(DAY_START, DAY_START + N_Q3))
     xa = np.zeros((N_Q3, T)); e = np.zeros((N_Q3, T))
     tot = plan = adj = em = 0.0
+    E = float(qp.E0)
     for i, D in enumerate(days):
-        r = qp.simulate_day_rt(data, D, 1.0, **kw)
+        r = qp.simulate_day_rt(data, D, 1.0, e_start=E, **kw)
         xa[i] = r["x_final"]; e[i] = r["e"]
         tot += r["total"]; plan += r["plan_cost"]; adj += r["adjust_net"]; em += r["emerg"]
+        E = float(r["E_end"])
     print(f"  {tag}: 总 {tot / 1e4:.1f} 万（计划 {plan / 1e4:.1f} + 调整 {adj / 1e4:+.1f} + 紧急 {em / 1e4:.1f}）")
     return {"total": tot, "plan": plan, "adj": adj, "emerg": em, "e": e, "xa": xa}
 
@@ -128,7 +138,7 @@ def write_result3(dates, price, out):
             ws.cell(row=rr, column=4, value=float(out["d"][i, 24 * b:24 * (b + 1)].sum()))
             if b == 0:
                 ws.cell(row=rr, column=5, value="00:00")
-                ws.cell(row=rr, column=6, value=6000.0)
+                ws.cell(row=rr, column=6, value=float(out["E_start"][i]))
             if b == 1:
                 ws.cell(row=rr, column=5, value="24:00")
                 ws.cell(row=rr, column=6, value=float(out["E"][i, -1]))
@@ -173,8 +183,12 @@ def verify_result3(path, dates, price, out):
     ws = wb["充放电量"]
     rows = [r for r in ws.iter_rows(min_row=2, values_only=True) if r[1] is not None]
     chk["充放表行数"] = len(rows)
-    ev = [float(r[5]) for r in rows if r[4] in ("00:00", "24:00") and r[5] is not None]
-    chk["储能端点最大偏离6000/kWh"] = float(max(abs(v - 6000.0) for v in ev))
+    e0 = [float(rows[6 * i][5]) for i in range(N_Q3)]
+    e24 = [float(rows[6 * i + 1][5]) for i in range(N_Q3)]
+    chk["跨日SOC衔接最大误差/kWh"] = float(
+        max(abs(e24[i] - e0[i + 1]) for i in range(N_Q3 - 1))
+    )
+    chk["日末SOC非固定取值数"] = int(len(set(round(v, 3) for v in e24)))
 
     ws = wb["紧急购电量"]
     kw = sum(float(r[2]) for r in ws.iter_rows(min_row=2, values_only=True) if r[2] is not None)
@@ -261,7 +275,9 @@ def main():
             "主方案：负荷使用目标日前历史预测；0:00 光伏用组合预测"
             "（λ=0.7·官方f0 + 0.3·历史口E，历史权重参数平滑 β=0.1）；"
             "6/12/18 点用同组合口径的最新预报调整；6:00/12:00 叠加无前视场景对冲"
-            f"（残差块仅取自目标日之前，{N_SCEN} 情景）；逐槽因果执行（q2.exec_segment_causal，"
+            f"（残差块仅取自目标日之前，{N_SCEN} 情景）；储能采用 2 日预测窗口滚动优化，"
+            "当前日末 SOC 不固定并传递到下一日，只有 48 小时视野远端回到 6000 kWh；"
+            "逐槽因果执行（q2.exec_segment_causal，"
             "不读取未来实际值），缺口 5 倍紧急。结算 = Σ[p·x_adj + 0.5p|x_plan−x_adj|] + 5Σp·e。"
             "result3.xlsx 已生成并回读校验；图 figures/Q3_策略费用对比.pdf、Q3_逐日紧急购电.pdf、"
             "Q3_调整量分布.pdf；逐日表 code/outputs/q3_daily.csv。"

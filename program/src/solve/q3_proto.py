@@ -97,6 +97,8 @@ def hist_forecast(data: dict, D: int) -> np.ndarray:
     """
     if "PV_OVERRIDE" in data and D in data["PV_OVERRIDE"]:
         return np.clip(np.asarray(data["PV_OVERRIDE"][D], dtype=float), 0.0, None)
+    if D < 2:
+        return np.clip(np.asarray(data["pv_typ"], dtype=float), 0.0, None)
     if "U_SMOOTH" in data:
         u = data["U_SMOOTH"][D]
     else:
@@ -111,11 +113,65 @@ def hist_load_forecast(data: dict, D: int) -> np.ndarray:
     采用 Q2E 的同星期日/两周前/典型日三源权重；权重由 ``D-1`` 及更早的
     已实现费用标定。附件 2 的目标日实际负荷只在执行回放时使用。
     """
-    j = max(D - 1, 13)
+    if D < 14:
+        return np.clip(np.asarray(data["load_typ"], dtype=float), 0.0, None)
+    j = D - 1
     w = _softmax(data["TH"][j, :3])
     load, typ = data["load"], data["load_typ"]
     d7, d14 = max(0, D - 7), max(0, D - 14)
     return np.clip(w[0] * load[d7] + w[1] * load[d14] + w[2] * typ, 0.0, None)
+
+
+def hist_forecast_asof(data: dict, target_D: int, asof_D: int) -> np.ndarray:
+    """在 ``asof_D`` 日 0:00 预测目标日光伏，禁止读取当日及以后实际值。
+
+    两日滚动时 ``target_D=asof_D+1``，附件 3 尚无次日 0:00 预报，因此沿用
+    当前已冻结的历史组合权重与截至 ``asof_D-1`` 的最近两条实际日曲线。
+    """
+    if target_D == asof_D:
+        return hist_forecast(data, target_D)
+    if target_D < asof_D or target_D > asof_D + 1:
+        raise ValueError("历史光伏预测仅支持当前日或次日两日窗口")
+    if asof_D < 2:
+        return np.clip(np.asarray(data["pv_typ"], dtype=float), 0.0, None)
+    u = (data["U_SMOOTH"][asof_D] if "U_SMOOTH" in data
+         else _softmax(data["TH"][max(asof_D - 1, 13), 3:6]))
+    pv, typ = data["pv_act"], data["pv_typ"]
+    d1, d2 = max(0, asof_D - 1), max(0, asof_D - 2)
+    return np.clip(u[0] * pv[d1] + u[1] * pv[d2] + u[2] * typ, 0.0, None)
+
+
+def hist_load_forecast_asof(data: dict, target_D: int, asof_D: int) -> np.ndarray:
+    """在 ``asof_D`` 日 0:00 预测当前/次日负荷（两日窗口，无前视）。"""
+    if target_D < asof_D or target_D > asof_D + 1:
+        raise ValueError("历史负荷预测仅支持当前日或次日两日窗口")
+    if asof_D < 14:
+        return np.clip(np.asarray(data["load_typ"], dtype=float), 0.0, None)
+    w = _softmax(data["TH"][asof_D - 1, :3])
+    load, typ = data["load"], data["load_typ"]
+    d7, d14 = max(0, target_D - 7), max(0, target_D - 14)
+    if d7 >= asof_D or d14 >= asof_D:
+        raise RuntimeError("两日负荷预测读取了尚未实现的实际日")
+    return np.clip(w[0] * load[d7] + w[1] * load[d14] + w[2] * typ, 0.0, None)
+
+
+def plan_two_day(data: dict, D: int, lam: float, e_start: float,
+                 margin: float = 0.0):
+    """在 D 日 0:00 做 48 小时滚动计划，只执行首日；当前日末 SOC 不固定。"""
+    price = data["price"]
+    f0 = q2._hour_to_slots(data["fc0"][D])
+    ph = hist_forecast_asof(data, D, D)
+    pv0 = lam * f0 + (1.0 - lam) * ph
+    if margin:
+        pv0 = pv0 * (1.0 - margin)
+    pv1 = hist_forecast_asof(data, D + 1, D)
+    load0 = hist_load_forecast_asof(data, D, D)
+    load1 = hist_load_forecast_asof(data, D + 1, D)
+    xh, Eh, res = q2.plan_horizon(
+        np.tile(price, 2), np.concatenate([load0, load1]) / 6.0,
+        np.concatenate([pv0, pv1]) / 6.0, e_start, E0, eps=EPS_TH,
+    )
+    return xh[:T], Eh[:T], res
 
 
 def make_smooth_u(data: dict, beta: float) -> np.ndarray:
@@ -350,7 +406,8 @@ def exec_segment_hindsight(price, load_kwh, pv_kwh, x_seg, e_start, e_end, t0, e
 
 def simulate_day_rt(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
                     settle: str = "final", use_new_fc: bool = True,
-                    adj_lam: float | None = None, margin: float = 0.0) -> dict:
+                    adj_lam: float | None = None, margin: float = 0.0,
+                    e_start: float = E0) -> dict:
     """因果实时执行：调整使用已实现 SOC，每槽只读取当前实际值。
 
     与 ``simulate_day`` 的区别（后者为"事后执行"：全天一次执行 LP）：
@@ -369,7 +426,8 @@ def simulate_day_rt(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
     if margin:
         pv_plan = pv_plan * (1.0 - margin)      # 光伏预测保守打折（多买保险）
 
-    x_plan, E_plan, _ = q2.plan_day(price, load_fc_kwh, pv_plan, E0, eps=EPS_TH)
+    x_plan, E_plan, _ = plan_two_day(data, D, lam, e_start, margin=margin)
+    e_day_end = float(E_plan[-1])
 
     x_seq = x_plan.copy()
     E_target = E_plan.copy()
@@ -378,7 +436,7 @@ def simulate_day_rt(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
     d_all = np.zeros(T)
     E_exec = np.zeros(T)
     x_hist = {0: x_plan.copy()}
-    E_now = E0
+    E_now = e_start
     t = 0
     for pub in (6, 12, 18):
         t1 = pub * 6
@@ -400,7 +458,10 @@ def simulate_day_rt(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
             else:
                 src = f0
             pv_new = np.clip(src, 0.0, None) / 6.0
-            x_adj, E_adj = adjust_day(price, load_fc_kwh, pv_new, x_plan, E_now, t1)
+            x_adj, E_adj = adjust_day(
+                price, load_fc_kwh, pv_new, x_plan, E_now, t1,
+                e_terminal=e_day_end,
+            )
             x_seq[t1:] = x_adj
             E_target[t1:] = E_adj
             x_hist[pub] = x_seq.copy()
@@ -439,6 +500,7 @@ def simulate_day_rt(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
         "adj_abs_kwh": float(np.abs(x_final - x_plan).sum()),
         "x_plan": x_plan, "x_final": x_final, "e": e_total, "E": E_target,
         "c": c_all, "d": d_all, "E_exec": E_exec,
+        "E_start": float(e_start), "E_end": float(E_exec[-1]),
     }
 
 
@@ -578,7 +640,7 @@ def simulate_day_rt_hedge(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
                           n_scen: int = 10, seed: int = 0,
                           adj_lam: float | None = None, margin: float = 0.0,
                           settle: str = "final", pool_min_month: int = 14,
-                          pool_lookback: int = 90) -> dict:
+                          pool_lookback: int = 90, e_start: float = E0) -> dict:
     """因果执行 + 无前视场景对冲（6:00/12:00 用对冲 LP，18:00 段光伏≈0 不对冲）。
 
     场景只从目标日之前的残差块（``causal_residual_pool``）采样，
@@ -595,7 +657,8 @@ def simulate_day_rt_hedge(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
     pv_plan = (lam * f0 + (1.0 - lam) * ph) / 6.0
     if margin:
         pv_plan = pv_plan * (1.0 - margin)
-    x_plan, E_plan, _ = q2.plan_day(price, load_fc_kwh, pv_plan, E0, eps=EPS_TH)
+    x_plan, E_plan, _ = plan_two_day(data, D, lam, e_start, margin=margin)
+    e_day_end = float(E_plan[-1])
 
     x_seq = x_plan.copy()
     E_target = E_plan.copy()
@@ -605,7 +668,7 @@ def simulate_day_rt_hedge(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
     E_exec = np.zeros(T)
     scenario_days: list[int] = []
     x_hist = {0: x_plan.copy()}
-    E_now = E0
+    E_now = e_start
     t = 0
     for pub in (6, 12, 18):
         t1 = pub * 6
@@ -639,11 +702,13 @@ def simulate_day_rt_hedge(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
                     for ix in idxs
                 ]
                 x_adj, E_adj = adjust_day_hedge(
-                    price, load_fc_kwh, scens, x_plan, E_now, t1
+                    price, load_fc_kwh, scens, x_plan, E_now, t1,
+                    e_terminal=e_day_end,
                 )
             else:
                 x_adj, E_adj = adjust_day(
-                    price, load_fc_kwh, pv_nom_full, x_plan, E_now, t1
+                    price, load_fc_kwh, pv_nom_full, x_plan, E_now, t1,
+                    e_terminal=e_day_end,
                 )
             x_seq[t1:] = x_adj
             E_target[t1:] = E_adj
@@ -682,6 +747,7 @@ def simulate_day_rt_hedge(data: dict, D: int, lam: float, adj_hours=(6, 12, 18),
         "c": c_all, "d": d_all, "E_exec": E_exec,
         "scenario_max_day": max(scenario_days, default=-1),
         "scenario_count": len(scenario_days),
+        "E_start": float(e_start), "E_end": float(E_exec[-1]),
     }
 
 
