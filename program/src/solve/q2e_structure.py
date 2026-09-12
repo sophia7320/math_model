@@ -25,21 +25,8 @@ from scipy import stats
 import program as pm
 from solve import q2
 from solve.common import ROOT
+from solve.io.report import record
 from solve.q2_adaptive import AdaptiveWeightModel
-
-
-def record(section: str, data, note: str = "") -> None:
-    """写结果报告：先删除同名旧章节再追加。"""
-    path = pm.reports_dir() / "RESULTS_REPORT.md"
-    if path.exists():
-        text = path.read_text(encoding="utf-8")
-        marker = f"### {section}"
-        pos = text.find(marker)
-        if pos != -1:
-            end = text.find("\n### ", pos + len(marker))
-            text = text[:pos] if end == -1 else text[:pos] + text[end + 1 :]
-            path.write_text(text, encoding="utf-8")
-    pm.record_result(section, data, note=note)
 
 
 def acf(x: np.ndarray, max_lag: int) -> np.ndarray:
@@ -60,13 +47,6 @@ def ar1_half_life(x: np.ndarray) -> tuple[float, float]:
     return rho, hl
 
 
-def forecast_kw(model: AdaptiveWeightModel, w, u, d: int):
-    """第 d 天预测功率（kW，未裁剪）。"""
-    l = w[0] * model.L[d - 7] + w[1] * model.L[d - 14] + w[2] * model.L_typ
-    p = u[0] * model.P[d - 1] + u[1] * model.P[d - 2] + u[2] * model.P_typ
-    return l, p
-
-
 def main() -> dict:
     pm.init(seed=42, root=str(ROOT))
     log = pm.get_logger("q2e-structure")
@@ -84,7 +64,7 @@ def main() -> dict:
     p_hat = np.zeros((n, q2.T))
     for i, d in enumerate(rep):
         w, u = ws[i]
-        l, p = forecast_kw(model, w, u, d)
+        l, p = model.forecast_kw(w, u, d)
         p_hat[i] = np.clip(p, 0.0, None)
         e_load[i] = l - model.L[d]
         e_pv[i] = p - model.P[d]

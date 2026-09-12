@@ -51,6 +51,7 @@ from solve.data.attachments import load_all
 from solve.flows.q2_year import run_deterministic
 from solve.io.excel import verify_result2 as _verify_result2
 from solve.io.excel import write_result2
+from solve.io.figures import month_axis
 from solve.io.report import record
 from solve.models.weights import simplex_grid, softmax
 
@@ -180,8 +181,8 @@ class AdaptiveWeightModel:
     #     L̂ = w1·L(d−7) + w2·L(d−14) + w3·L̄      [kW]，除以 6 → kWh/槽
     #     P̂ = u1·P(d−1) + u2·P(d−2) + u3·P̄      [kW]，除以 6 → kWh/槽
     #     凸权重保证非负；预测值再裁剪 ≥ 0。
-    def forecast(self, w, u, d: int):
-        """第 d 天预测（kWh/时段）：三源凸组合，裁剪非负。"""
+    def forecast_kw(self, w, u, d: int):
+        """第 d 天三源预测功率（kW，未裁剪）：forecast 的共享实现。"""
         l_kw = (
             w[0] * self.L[d - self.LAG_L[0]]
             + w[1] * self.L[d - self.LAG_L[1]]
@@ -192,6 +193,11 @@ class AdaptiveWeightModel:
             + u[1] * self.P[d - self.LAG_P[1]]
             + u[2] * self.P_typ
         )
+        return l_kw, p_kw
+
+    def forecast(self, w, u, d: int):
+        """第 d 天预测（kWh/时段）：三源凸组合，裁剪非负。"""
+        l_kw, p_kw = self.forecast_kw(w, u, d)
         return np.clip(l_kw, 0.0, None) / 6.0, np.clip(p_kw, 0.0, None) / 6.0
 
     # ── 单日费用（标定目标） ────────────────────────────────────────
@@ -552,8 +558,6 @@ class AdaptiveWeightModel:
         # ---- 图：权重演化 ----
         dates = df_e["日期"].tolist()
         x = np.arange(len(dates))
-        month_starts = [i for i, s in enumerate(dates) if s.endswith("-01")]
-        month_labels = [dates[i][5:7] + "月" for i in month_starts]
 
         fig, axes = plt.subplots(2, 1, figsize=(7, 5.6), sharex=True)
         groups = [
@@ -567,9 +571,8 @@ class AdaptiveWeightModel:
             ax.set_ylabel(ylabel)
             ax.set_ylim(0, 1)
             ax.legend(loc="upper center", ncol=3, fontsize=8, framealpha=0.9)
-        axes[1].set_xticks(month_starts)
-        axes[1].set_xticklabels(month_labels)
         axes[1].set_xlabel("日期")
+        month_axis(axes[1], dates)
         pm.save_fig(fig, "Q2E_权重演化", data=df_e[["日期"] + w_cols + u_cols])
 
         # ---- 图：费用对照 ----
@@ -592,9 +595,8 @@ class AdaptiveWeightModel:
             xlabel="日期",
             ylabel="紧急购电量 / kWh",
         )
-        ax3.set_xticks(month_starts)
-        ax3.set_xticklabels(month_labels)
         ax3.legend()
+        month_axis(ax3, dates)
         pm.save_fig(
             fig3,
             "Q2E_紧急购电对比",

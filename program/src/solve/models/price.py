@@ -43,20 +43,35 @@ def price_forecast_next(D: int, v: np.ndarray, p4: np.ndarray, p_typ: np.ndarray
     return v[0] * p4[d1 - 2] + v[1] * p4[d1 - 7] + v[2] * p_typ
 
 
-def rolling_v_seq() -> np.ndarray:
-    """逐日电价三源权重：滚动费用标定（W=7）+ 动态修正 β=0.1（无前视）。
+def rolling_v_star() -> np.ndarray:
+    """逐日电价三源权重 v*：窗口 W=7 费用标定的 argmin（不平滑，无前视）。
 
-    复用 q4_price_fit 的逐日费用表（含因果执行口径）；D<31 预热用纯典型日。
+    v*_D = argmin_{v∈网格} (1/|H_D|)·Σ_{k∈H_D} C_k(v)，H_D = [max(31, D−7), D)。
+    返回 (N_DAY, 3)；D < REPORT_START 的位置为占位零向量（调用方不取）。
+    依赖 code/outputs/q4_price_fit_daily.npz（由 solve.q4_price_fit 生成）。
     """
     z = np.load(ROOT / "code" / "outputs" / "q4_price_fit_daily.npz")
     daily_costs = z["daily_costs"]
     grid = [tuple(v) for v in z["grid"]]
+    seq = np.zeros((N_DAY, 3))
+    for D in range(REPORT_START, N_DAY):
+        hist = daily_costs[max(REPORT_START, D - W_V):D]
+        # 预热首日窗口为空：退回纯典型日 (0,0,1)（与旧实现一致）
+        seq[D] = (np.array(grid[int(np.argmin(hist.mean(axis=0)))])
+                  if len(hist) else np.array([0.0, 0.0, 1.0]))
+    return seq
+
+
+def rolling_v_seq() -> np.ndarray:
+    """逐日电价三源权重：滚动费用标定（W=7）+ 动态修正 β=0.1（无前视）。
+
+    v_D = β·v*_D + (1−β)·v_{D−1}；D<31 预热用纯典型日 (0,0,1)。
+    """
+    v_star = rolling_v_star()
     seq = np.tile(np.array([0.0, 0.0, 1.0]), (N_DAY, 1))
     prev = None
     for D in range(REPORT_START, N_DAY):
-        hist = daily_costs[max(REPORT_START, D - W_V):D]
-        v_new = (np.array(grid[int(np.argmin(hist.mean(axis=0)))])
-                 if len(hist) else np.array([0.0, 0.0, 1.0]))
+        v_new = v_star[D]
         prev = v_new if prev is None else BETA * v_new + (1.0 - BETA) * prev
         seq[D] = prev
     return seq

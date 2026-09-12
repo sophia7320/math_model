@@ -20,6 +20,7 @@ import program as pm
 from solve import q2
 from solve import q3_proto as qp
 from solve.common import ROOT
+from solve.io.report import record
 
 BETA = 0.1
 SEED = 7
@@ -52,19 +53,6 @@ VARIANTS = [
     ("组合权重 λ=0.5", dict(n_scen=10, pmm=14, plb=90, lam=0.5)),
     ("组合权重 λ=0.9", dict(n_scen=10, pmm=14, plb=90, lam=0.9)),
 ]
-
-
-def record(section: str, data, note: str = "") -> None:
-    path = pm.reports_dir() / "RESULTS_REPORT.md"
-    if path.exists():
-        text = path.read_text(encoding="utf-8")
-        marker = f"### {section}"
-        pos = text.find(marker)
-        if pos != -1:
-            end = text.find("\n### ", pos + len(marker))
-            text = text[:pos] if end == -1 else text[:pos] + text[end + 1:]
-            path.write_text(text, encoding="utf-8")
-    pm.record_result(section, data, note=note)
 
 
 def main():

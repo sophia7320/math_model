@@ -20,15 +20,10 @@ import program as pm
 from solve import q2
 from solve.common import DATA_C, E0, ROOT, T
 from solve.models.price import forecast_price  # 唯一实现（models/price.py），此处再导出
+from solve.models.weights import simplex_grid  # 唯一实现（models/weights.py）
 
 DAY_START = q2.REPORT_START      # 31
 N_DAY = q2.N_DAY                 # 365
-
-
-def simplex_grid(step: float = 0.1):
-    n = int(round(1.0 / step))
-    return [(i / n, j / n, (n - i - j) / n)
-            for i in range(n + 1) for j in range(n + 1 - i)]
 
 
 def mae_of(p4, p_typ, v, days):

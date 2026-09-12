@@ -38,6 +38,7 @@ from solve import q2
 from solve import q3_proto as qp
 from solve.common import ROOT, T
 from solve.io.excel import verify_result3, write_result3
+from solve.io.report import record
 
 LAM = 0.7           # 0:00 组合权重（官方占比）
 ADJ_LAM = 0.7       # 调整层组合权重
@@ -46,20 +47,6 @@ N_SCEN = 10         # 对冲情景数
 SEED = 7
 DAY_START = q2.REPORT_START      # 31（2025-02-01）
 N_Q3 = q2.N_DAY - DAY_START      # 334
-
-
-def record(section: str, data, note: str = "") -> None:
-    """写结果报告：先删同名旧章节再追加（pm.record_result 为追加模式）。"""
-    path = pm.reports_dir() / "RESULTS_REPORT.md"
-    if path.exists():
-        text = path.read_text(encoding="utf-8")
-        marker = f"### {section}"
-        pos = text.find(marker)
-        if pos != -1:
-            end = text.find("\n### ", pos + len(marker))
-            text = text[:pos] if end == -1 else text[:pos] + text[end + 1:]
-            path.write_text(text, encoding="utf-8")
-    pm.record_result(section, data, note=note)
 
 
 def _day_result(data, D, **kw):

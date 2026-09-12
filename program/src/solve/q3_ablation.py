@@ -18,25 +18,13 @@ import pandas as pd
 import program as pm
 from solve import q3_proto as qp
 from solve.common import ROOT
+from solve.io.report import record
 
 BETA = 0.1
 N_SCEN = 10
 SEED = 7
 LAM = 0.7
 DAYS = list(range(31, 365))
-
-
-def record(section: str, data, note: str = "") -> None:
-    path = pm.reports_dir() / "RESULTS_REPORT.md"
-    if path.exists():
-        text = path.read_text(encoding="utf-8")
-        marker = f"### {section}"
-        pos = text.find(marker)
-        if pos != -1:
-            end = text.find("\n### ", pos + len(marker))
-            text = text[:pos] if end == -1 else text[:pos] + text[end + 1:]
-            path.write_text(text, encoding="utf-8")
-    pm.record_result(section, data, note=note)
 
 
 def run_cfg(tag, fn, *, lam, adj_lam, hedge, data):

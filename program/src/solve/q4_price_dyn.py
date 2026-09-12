@@ -5,6 +5,7 @@
 2. 动态修正：v_D = β·v*_D + (1−β)·v_{D−1}（β∈{0.1,0.3,0.5,0.7}）
 3. 用平滑后的连续 v 序列重新模拟全年（跨日连续储能），对比 334 天费用
 
+复用的公共实现：models/price.forecast_price（三源预测）、models/price.rolling_v_star（v* 选择）。
 运行（program/ 下）：uv run python -m solve.q4_price_dyn
 """
 from __future__ import annotations
@@ -16,18 +17,18 @@ import pandas as pd
 
 import program as pm
 from solve import q2
-from solve.common import DATA_C, E0, ROOT, T
+from solve.common import DATA_C, E0, ROOT
+from solve.models.price import forecast_price, rolling_v_star
 
 DAY_START = q2.REPORT_START
 N_DAY = q2.N_DAY
 
 
-def forecast_price(D, v, p4, p_typ):
-    return v[0] * p4[D - 1] + v[1] * p4[D - 7] + v[2] * p_typ
-
-
 def run_year_vseq(p4, p_typ, data, v_seq):
-    """按给定 v 序列模拟全年（v_seq: {day: v}；缺省天用纯典型日），返回 334 天费用。"""
+    """按给定 v 序列模拟全年（v_seq: {day: v}；缺省天用纯典型日），返回 334 天费用。
+
+    结算：Σ p4·x + 5·Σ p4·e（附件 4 真实价）；储能跨日连续、逐槽因果执行。
+    """
     load = data["load"]; pv_act = data["pv_act"]; fc0 = data["fc0"]
     E = E0
     tot = 0.0
@@ -50,16 +51,9 @@ def main():
     df4 = pm.read_table(DATA_C / "附件4.xlsx")
     p4 = df4.iloc[:, 1:145].to_numpy(float)
 
-    z = np.load(ROOT / "code" / "outputs" / "q4_price_fit_daily.npz")
-    daily_costs = z["daily_costs"]
-    grid = [tuple(v) for v in z["grid"]]
-
-    # 滚动费用标定 → v*_D
-    v_star = {}
-    for D in range(DAY_START, N_DAY):
-        i0 = max(DAY_START, D - 7)
-        j = int(np.argmin(daily_costs[i0:D].mean(axis=0)))
-        v_star[D] = grid[j]
+    # 滚动费用标定 → v*_D（共享实现，无前视）
+    v_star_all = rolling_v_star()
+    v_star = {D: tuple(v_star_all[D]) for D in range(DAY_START, N_DAY)}
     print(f"v* 逐日选择：v1 均值 {np.mean([v[0] for v in v_star.values()]):.2f}、"
           f"v2 {np.mean([v[1] for v in v_star.values()]):.2f}、"
           f"v3 {np.mean([v[2] for v in v_star.values()]):.2f}")

@@ -48,6 +48,7 @@ from solve.io.excel import (
     write_result4_2,
     write_result4_3,
 )
+from solve.io.report import record
 from solve.models.price import price_forecast_d, price_forecast_next, rolling_v_seq  # noqa: F401
 
 
@@ -108,20 +109,6 @@ def make_figures(data, recs_h, recs_g, s_h, s_g, daily) -> None:
     pm.save_fig(fig, "Q4_逐日紧急购电",
                 data=pd.DataFrame({"日期": [data["dates"][D] for D in days],
                                    "H紧急量/kWh": e_h, "G紧急量/kWh": e_g}))
-
-
-def record(section: str, data_, note: str = "") -> None:
-    """写结果报告：先删同名旧章节再追加（pm.record_result 为追加模式）。"""
-    path = pm.reports_dir() / "RESULTS_REPORT.md"
-    if path.exists():
-        text = path.read_text(encoding="utf-8")
-        marker = f"### {section}"
-        pos = text.find(marker)
-        if pos != -1:
-            end = text.find("\n### ", pos + len(marker))
-            text = text[:pos] if end == -1 else text[:pos] + text[end + 1:]
-            path.write_text(text, encoding="utf-8")
-    pm.record_result(section, data_, note=note)
 
 
 # ---------------------------------------------------------------------------

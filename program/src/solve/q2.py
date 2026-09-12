@@ -51,6 +51,7 @@ from solve.data.attachments import load_all
 from solve.flows.q2_year import hedge_day, run_deterministic, run_hedge, run_mc
 from solve.io.checks import verify
 from solve.io.excel import write_result2
+from solve.io.figures import month_axis
 
 
 def make_figures(dates, recs, mc_costs, plan_cost_report):
@@ -65,9 +66,7 @@ def make_figures(dates, recs, mc_costs, plan_cost_report):
     emerg_daily = np.array([recs[d]["emerg_kwh"] for d in rep])
     fig, ax = pm.line(np.arange(len(rep)), emerg_daily,
                       xlabel="日期", ylabel="紧急购电量 / kWh")
-    month_starts = [i for i, d in enumerate(rep) if dates[d].endswith("-01")]
-    ax.set_xticks(month_starts)
-    ax.set_xticklabels([dates[rep[i]][5:7] + "月" for i in month_starts])
+    month_axis(ax, [dates[d] for d in rep])
     pm.save_fig(fig, "Q2_逐日紧急购电",
                 data=pd.DataFrame({"日期": [dates[d] for d in rep],
                                    "紧急购电量_kWh": emerg_daily}))

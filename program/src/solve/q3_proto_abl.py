@@ -24,6 +24,7 @@ import pandas as pd
 from solve import q2
 from solve import q3_proto as qp
 from solve.common import E0, ROOT, T
+from solve.core.residual import latest_forecast
 
 DAY_START, N_DAYS = 31, 334
 DAYS = list(range(DAY_START, DAY_START + N_DAYS))
@@ -100,15 +101,6 @@ def run_settle(data):
 # ---------------------------------------------------------------------------
 # ④ 蒙特卡洛：尾部风险
 # ---------------------------------------------------------------------------
-def latest_forecast(data, D):
-    v = np.empty(T)
-    v[:36] = q2._hour_to_slots(data["fc0"][D])[:36]
-    v[36:72] = qp.fc_slots(data["fc6"][D], 6)[36:72]
-    v[72:108] = qp.fc_slots(data["fc12"][D], 12)[72:108]
-    v[108:] = qp.fc_slots(data["fc18"][D], 18)[108:]
-    return v
-
-
 def _stats(x):
     p95 = float(np.percentile(x, 95))
     return {"mean": float(x.mean()), "std": float(x.std()),

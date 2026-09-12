@@ -24,7 +24,7 @@ import program as pm
 from solve import q2
 from solve.common import E0, RESULTS_DIR, ROOT
 from solve.q2_adaptive import AdaptiveWeightModel
-from solve.q2e_structure import forecast_kw, record
+from solve.io.report import record
 
 REPORT_START = q2.REPORT_START
 REP = list(range(REPORT_START, q2.N_DAY))
@@ -95,7 +95,7 @@ def net_residuals(model: AdaptiveWeightModel, ws_list):
     lh = np.empty_like(e)
     for i, d in enumerate(REP):
         w, u = ws_list[i]
-        l, p = forecast_kw(model, w, u, d)
+        l, p = model.forecast_kw(w, u, d)
         lh[i] = np.clip(l, 0.0, None)
         e[i] = (model.L[d] - model.P[d]) - (l - p)
     return e, lh
@@ -117,7 +117,7 @@ def margin_refs(model: AdaptiveWeightModel, seq, months) -> dict:
     ratios = []
     for i, d in enumerate(REP):
         w, u = seq[i]
-        l, p = forecast_kw(model, w, u, d)
+        l, p = model.forecast_kw(w, u, d)
         mask = p > 500.0
         if mask.any():
             ratios.append(e[i][mask] / p[mask])
@@ -532,7 +532,7 @@ def write_result2_tuned(W: float = 5.0, kappa: float = 1.02, margin: float = 50.
     rows = []
     for i, d in enumerate(REP):
         w, u = seq[i]
-        l_kw, p_kw = forecast_kw(model, w, u, d)
+        l_kw, p_kw = model.forecast_kw(w, u, d)
         l_kw = np.clip(l_kw * kappa, 0.0, None)
         p_kw = np.clip(p_kw - margin, 0.0, None)
         x, _E, _ = q2.plan_day(model.price, l_kw / 6.0, p_kw / 6.0, E0, eps=EPS_PLAN)
