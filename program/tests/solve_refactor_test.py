@@ -45,10 +45,14 @@ def check_lp_golden() -> None:
     assert np.allclose(sol["E"], E2, atol=1e-10)
 
     for eps in (0.0, 1e-3):
-        xh, Eh = plan_horizon(PRICE, LOAD_KWH, PV_KWH, E0, E0, eps=eps)
+        xh, Eh, _ = plan_horizon(PRICE, LOAD_KWH, PV_KWH, E0, E0, eps=eps)
         xd, Ed, _ = q2.plan_day(PRICE, LOAD_KWH, PV_KWH, E0, eps=eps)
         assert np.allclose(xh, xd, atol=1e-10)
         assert np.allclose(Eh, Ed, atol=1e-10)
+
+    # 自由末端：e_terminal=None 时末端不锚定（48 小时远端守恒由 solve_causal_test 覆盖）
+    xf, Ef, _ = plan_horizon(PRICE, LOAD_KWH, PV_KWH, E0, None, eps=0.0)
+    assert len(xf) == q2.T and len(Ef) == q2.T
 
 
 def check_exec_golden() -> None:
@@ -165,20 +169,23 @@ def check_facade_api() -> None:
     from solve import q2_adaptive
 
     required_q2 = [
-        "plan_day", "exec_day", "exec_day_causal", "exec_segment_causal",
-        "load_all", "run_deterministic", "run_mc", "run_hedge", "write_result2",
-        "verify", "_hour_to_slots", "_events", "_fmt_time",
-        "CAUSAL_POLICY_VERSION", "EMERG_MULT", "EPS_THROUGHPUT",
-        "N_DAY", "REPORT_START", "T",
+        "plan_day", "plan_horizon", "exec_day", "exec_day_causal", "exec_segment_causal",
+        "run_exec", "load_all", "run_deterministic", "run_mc", "run_hedge", "hedge_day",
+        "write_result2", "verify", "_hour_to_slots", "_events", "_fmt_time",
+        "_scenario_from_residual", "CAUSAL_POLICY_VERSION", "EMERG_MULT",
+        "EPS_THROUGHPUT", "N_DAY", "REPORT_START", "T",
     ]
     for name in required_q2:
         assert hasattr(q2, name), f"q2.{name} 缺失"
 
     required_qp = [
         "adjust_day", "adjust_day_hedge", "causal_residual_pool",
-        "exec_segment_hindsight", "fc_slots", "forecast_residual", "hist_forecast",
-        "load_extended", "make_smooth_u", "simulate_day", "simulate_day_rt",
-        "simulate_day_rt_hedge", "latest_forecast", "perfect_day",
+        "exec_segment_hindsight", "exec_segment_causal", "run_exec", "fc_slots",
+        "forecast_at_publish", "forecast_residual", "hist_forecast",
+        "hist_load_forecast", "hist_forecast_asof", "hist_load_forecast_asof",
+        "joint_residual_blocks", "load_extended", "make_smooth_u", "plan_two_day",
+        "simulate_day", "simulate_day_rt", "simulate_day_rt_hedge",
+        "latest_forecast", "perfect_day", "E0",
         "EPS_TH", "EMERG_MULT", "LAMBDA_GRID", "W_WINDOW", "pm",
     ]
     for name in required_qp:

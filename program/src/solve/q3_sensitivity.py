@@ -2,7 +2,7 @@
 
 对照 GPT 版"场景数 5/10/20 + λ 窗口"的灵敏度思路；本工作区 Q3 的 λ 为固定值
 （无滚动窗口），因此等价地补测：
-  - 对冲情景数 n_scen ∈ {5, 10, 20}（正式 10）
+  - 对冲情景数 n_scen ∈ {5, 10, 20, 40}，并对 10/20/40 使用 3 个随机种子
   - 场景池回看窗口 lookback ∈ {30, 60, 90}（正式 90；同日样本 ≥14 时优先同月）
   - 组合权重 λ ∈ {0.5, 0.7, 0.9}（正式 0.7，0:00 与调整层同值）
 
@@ -22,8 +22,8 @@ from solve import q3_proto as qp
 from solve.common import ROOT
 from solve.io.report import record
 
-BETA = 0.1
-SEED = 7
+# 统一口径：`qp.load_extended()` 已生成 EWMA h=5 权重（data["EWMA_WU"]），
+# 旧版 β 平滑（U_SMOOTH）已退役，不再设置。
 DAYS = list(range(q2.REPORT_START, q2.N_DAY))
 
 _P = None
@@ -35,35 +35,54 @@ def _init(payload):
 
 
 def _task(t):
-    vi, D, n_scen, pmm, plb, lam = t
+    vi, D, n_scen, pmm, plb, lam, seed, e_start = t
     r = qp.simulate_day_rt_hedge(
-        _P, D, lam, adj_lam=lam, n_scen=n_scen, seed=SEED,
-        pool_min_month=pmm, pool_lookback=plb,
+        _P, D, lam, adj_lam=lam, n_scen=n_scen, seed=seed,
+        pool_min_month=pmm, pool_lookback=plb, e_start=e_start,
     )
     return (vi, D, float(r["plan_cost"]), float(r["adjust_net"]), float(r["emerg"]),
             float(r["e"].sum()), int(r.get("scenario_max_day", -1)))
 
 
 VARIANTS = [
-    ("正式（情景 10 / 池 14-90 / λ=0.7）", dict(n_scen=10, pmm=14, plb=90, lam=0.7)),
-    ("情景数 5", dict(n_scen=5, pmm=14, plb=90, lam=0.7)),
-    ("情景数 20", dict(n_scen=20, pmm=14, plb=90, lam=0.7)),
-    ("场景池回看 30 天", dict(n_scen=10, pmm=14, plb=30, lam=0.7)),
-    ("场景池回看 60 天", dict(n_scen=10, pmm=14, plb=60, lam=0.7)),
-    ("组合权重 λ=0.5", dict(n_scen=10, pmm=14, plb=90, lam=0.5)),
-    ("组合权重 λ=0.9", dict(n_scen=10, pmm=14, plb=90, lam=0.9)),
+    ("正式（情景 40 / seed=7）", dict(n_scen=40, pmm=14, plb=90, lam=0.7, seed=7)),
+    ("情景数 5 / seed=7", dict(n_scen=5, pmm=14, plb=90, lam=0.7, seed=7)),
+    ("情景数 10 / seed=7", dict(n_scen=10, pmm=14, plb=90, lam=0.7, seed=7)),
+    ("情景数 10 / seed=17", dict(n_scen=10, pmm=14, plb=90, lam=0.7, seed=17)),
+    ("情景数 10 / seed=27", dict(n_scen=10, pmm=14, plb=90, lam=0.7, seed=27)),
+    ("情景数 20 / seed=7", dict(n_scen=20, pmm=14, plb=90, lam=0.7, seed=7)),
+    ("情景数 20 / seed=17", dict(n_scen=20, pmm=14, plb=90, lam=0.7, seed=17)),
+    ("情景数 20 / seed=27", dict(n_scen=20, pmm=14, plb=90, lam=0.7, seed=27)),
+    ("情景数 40 / seed=17", dict(n_scen=40, pmm=14, plb=90, lam=0.7, seed=17)),
+    ("情景数 40 / seed=27", dict(n_scen=40, pmm=14, plb=90, lam=0.7, seed=27)),
+    ("场景池回看 30 天", dict(n_scen=10, pmm=14, plb=30, lam=0.7, seed=7)),
+    ("场景池回看 60 天", dict(n_scen=10, pmm=14, plb=60, lam=0.7, seed=7)),
+    ("组合权重 λ=0.5", dict(n_scen=10, pmm=14, plb=90, lam=0.5, seed=7)),
+    ("组合权重 λ=0.9", dict(n_scen=10, pmm=14, plb=90, lam=0.9, seed=7)),
 ]
+
+
 
 
 def main():
     pm.init(seed=42, root=str(ROOT))
     log = pm.get_logger("q3-sens")
     t0 = time.time()
-    data = qp.load_extended()
-    data["U_SMOOTH"] = qp.make_smooth_u(data, BETA)
+    data = qp.load_extended()  # 含统一 EWMA 权重（EWMA_WU）
 
-    tasks = [(vi, D, v["n_scen"], v["pmm"], v["plb"], v["lam"])
-             for vi, (_, v) in enumerate(VARIANTS) for D in DAYS]
+    # 每个配置先顺序推导 2 日滚动产生的跨日 SOC；正式日模拟仍可并行，
+    # 因为逐日执行被约束到该日自由优化出的计划末端。
+    starts = np.zeros((len(VARIANTS), len(DAYS)))
+    for vi, (_, v) in enumerate(VARIANTS):
+        E = float(qp.E0)
+        for di, D in enumerate(DAYS):
+            starts[vi, di] = E
+            _x, E_plan, _ = qp.plan_two_day(data, D, v["lam"], E)
+            E = float(E_plan[-1])
+    tasks = [
+        (vi, D, v["n_scen"], v["pmm"], v["plb"], v["lam"], v["seed"], starts[vi, di])
+        for vi, (_, v) in enumerate(VARIANTS) for di, D in enumerate(DAYS)
+    ]
     n = len(VARIANTS)
     plan = np.zeros(n)
     adj = np.zeros(n)
@@ -100,9 +119,9 @@ def main():
     record(
         "问题三 主方案灵敏度：情景数 / 场景池窗口 / 组合权重（因果口径）",
         out,
-        note=("对正式主方案（组合 λ=0.7、三点调整、情景对冲、逐槽因果）做单因素灵敏度："
-              "对冲情景数、场景池回看窗口、组合权重 λ。随机流固定 (seed, D, pub)=7，"
-              "各配置与正式配置仅差一个参数；场景前视违规天数应全为 0。"
+        note=("对正式主方案（2 日滚动、组合 λ=0.7、三点调整、情景对冲、逐槽因果）做单因素灵敏度："
+              "对冲情景数使用 seed=7/17/27 检查随机稳定性，并单独改变场景池回看窗口、"
+              "组合权重 λ；场景前视违规天数应全为 0。"
               "数据 code/outputs/q3_sensitivity.csv。"),
     )
     log.info("Q3 灵敏度完成（{:.0f}s）", time.time() - t0)

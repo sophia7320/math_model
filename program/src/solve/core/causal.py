@@ -24,9 +24,14 @@ CAUSAL_POLICY_VERSION = "greedy-reachable-v1"   # 因果执行策略版本（参
 #     Δ_balance = −net_i/η        （缺口 → 放电，E 下降）
 #     Δ_balance = −η·net_i        （富余 → 充电，E 上升）
 #
-# 为避免"短视排空"，将下一时刻 SOC 投影到仍然可达终端 e_end 的区间：
-#     lo_i = max( E_min,  E_now − down,  e_end − remain·up   )
-#     hi_i = max 的对称式： min( E_max,  E_now + up,  e_end + remain·down )
+# 末段目标与执行策略（EXEC_POLICY）：
+#   - e_end 给定（"target"）：把下一时刻 SOC 投影到仍能到达 e_end 的区间
+#         lo_i = max(E_min, E_now − down, e_end − remain·up)
+#         hi_i = min(E_max, E_now + up, e_end + remain·down)
+#   - e_end=None（"free"，统一口径）或 no_purchase_charge=True：
+#         仅受容量/功率约束 lo_i = max(E_min, E_now−down), hi_i = min(E_max, E_now+up)
+#     free 策略不迫使"紧急购电充能/扣留放电"，与 dayend 同值且更简洁
+#     （见 reports/执行器段末目标实验.md）。
 #     E_{i+1} = clip(E_now + Δ_balance, lo_i, hi_i)      remain = m−i−1
 #
 # 由 E_{i+1} 反推充放量：
@@ -36,15 +41,19 @@ CAUSAL_POLICY_VERSION = "greedy-reachable-v1"   # 因果执行策略版本（参
 #     gap_i = L_i + c_i − P_i − x_i − d_i
 #     gap_i ≥ 0 → e_i = gap_i（紧急购电）；gap_i < 0 → s_i = −gap_i（弃光）
 # ===========================================================================
-def exec_segment_causal(load_kwh, pv_kwh, x_commit, e_start, e_end):
+def exec_segment_causal(load_kwh, pv_kwh, x_commit, e_start, e_end,
+                        no_purchase_charge: bool = False):
     """逐槽因果执行：每槽只使用当前已实现的负荷和光伏，不读取未来实际值。
 
     策略：先用储能吸收当前富余或填补当前缺口，再把下一时刻 SOC 投影到
     "仍能在剩余时段到达 e_end"的可达区间；无法被储能覆盖的缺口记为紧急购电，
-    富余且无法消纳的部分记为弃电。严格满足容量、功率与终端条件。
+    富余且无法消纳的部分记为弃电。
 
-    参数均为长度 m 的 kWh/槽序列；返回 c/d/s/E/e 五条序列。
-    说明：终端目标 e_end 需落在 m 步可达域内（真实段长 36 槽恒满足）。
+    可选策略开关（2026-09-13 增设，供"段末目标机制"对照实验）：
+    - ``e_end=None``：完全自由末端（仅受容量/功率约束，不做可达性投影）；
+    - ``no_purchase_charge=True``：禁止"为充能而紧急购电"——SOC 不得被抬升到
+      自然平衡点之上，段末目标允许偏离（偏差在返回值中报告）。
+    参数均为长度 m 的 kWh/槽序列；返回 c/d/s/E/e（另附诊断量）。
     """
     load_kwh = np.asarray(load_kwh, dtype=float)
     pv_kwh = np.asarray(pv_kwh, dtype=float)
@@ -53,8 +62,10 @@ def exec_segment_causal(load_kwh, pv_kwh, x_commit, e_start, e_end):
         raise ValueError("因果执行输入必须是一维序列")
     if not (len(load_kwh) == len(pv_kwh) == len(x_commit)):
         raise ValueError("因果执行的负荷、光伏与购电序列必须等长")
-    if not (E_MIN <= e_start <= E_MAX and E_MIN <= e_end <= E_MAX):
-        raise ValueError("因果执行的始末 SOC 超出安全区间")
+    if not (E_MIN <= e_start <= E_MAX):
+        raise ValueError("因果执行的初始 SOC 超出安全区间")
+    if e_end is not None and not (E_MIN <= e_end <= E_MAX):
+        raise ValueError("因果执行的末端 SOC 超出安全区间")
 
     m = len(load_kwh)
     c = np.zeros(m)
@@ -69,9 +80,14 @@ def exec_segment_causal(load_kwh, pv_kwh, x_commit, e_start, e_end):
 
     for i in range(m):
         remain = m - i - 1
-        # E_next 既要能由当前 SOC 一步到达，也要能在剩余槽回到 e_end
-        lo = max(E_MIN, e_now - max_down, float(e_end) - remain * max_up)
-        hi = min(E_MAX, e_now + max_up, float(e_end) + remain * max_down)
+        if e_end is None or no_purchase_charge:
+            # 自由末端（或禁止购电充能）：仅受容量与功率约束
+            lo = max(E_MIN, e_now - max_down)
+            hi = min(E_MAX, e_now + max_up)
+        else:
+            # E_next 既要能由当前 SOC 一步到达，也要能在剩余槽回到 e_end
+            lo = max(E_MIN, e_now - max_down, float(e_end) - remain * max_up)
+            hi = min(E_MAX, e_now + max_up, float(e_end) + remain * max_down)
         if lo > hi + tol:
             raise RuntimeError(
                 f"终端 SOC 不可达：i={i}, interval=[{lo:.6f}, {hi:.6f}]"
@@ -95,17 +111,33 @@ def exec_segment_causal(load_kwh, pv_kwh, x_commit, e_start, e_end):
         E[i] = e_next
         e_now = e_next
 
-    if m and abs(E[-1] - e_end) > 1e-6:
+    term_err = abs(E[-1] - float(e_end)) if e_end is not None else 0.0
+    if e_end is not None and m and not no_purchase_charge and term_err > 1e-6:
         raise RuntimeError(f"因果执行末端 SOC 偏差 {E[-1] - e_end:.3e} kWh")
-    return {"c": c, "d": d, "s": spill, "E": E, "e": emerg}
+    return {"c": c, "d": d, "s": spill, "E": E, "e": emerg,
+            "terminal_error_kwh": float(term_err)}
 
 
 def exec_day_causal(price, load_kwh, pv_kwh, x_plan, e_start, e_end=None):
-    """正式因果执行口径：不利用未来实际值，缺口按 5 倍价计费（价格仅在外层汇总）。
+    """旧版（日循环）因果执行包装：e_end=None 时终端取 e_start。
 
-    费用 = Σ_t price_t·x_t（外层）+ Σ_t 5·price_t·e_t（外层按 e 计）。
+    正式口径（``consistency.EXEC_POLICY="free"``）已改为无段末硬目标：
+    直接调用 ``exec_segment_causal(..., e_end=None)``；本函数仅供历史对照。
     """
     del price
     return exec_segment_causal(
         load_kwh, pv_kwh, x_plan, e_start, e_start if e_end is None else e_end
     )
+
+
+def run_exec(policy: str, load, pv, x, e0, e1, last: bool = False):
+    """按执行策略调用逐槽因果执行器（段末目标机制对照，consistency 规范扩展）。
+
+    policy:
+      "target" 段末目标硬跟踪（原口径，历史对照）；
+      "free"   无段末目标（仅容量/功率约束；统一口径 EXEC_POLICY）；
+      "dayend" 仅最后一段跟踪段末目标，中间段自由（与 free 同值，见探针）。
+    """
+    if policy == "free" or (policy == "dayend" and not last):
+        return exec_segment_causal(load, pv, x, e0, None)
+    return exec_segment_causal(load, pv, x, e0, e1)

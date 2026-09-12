@@ -37,6 +37,9 @@ def _scan_records(recs, load, pv_act, *, x_key="x", start=0, end=None,
     prev = None
     for i in range(end):
         r = recs[i]
+        if r is None:
+            prev = None
+            continue
         D = int(r["D"]) if isinstance(r, dict) and "D" in r else i
         if isinstance(r, dict) and r.get("scenario_max_day", -1) >= D and D >= start:
             future_viol += 1

@@ -89,21 +89,80 @@ def _worker_day(d: int):
 
 
 def hist_forecast(data: dict, D: int) -> np.ndarray:
-    """口径 E 光伏预测（144 槽，kW）：u 来自 Q2E 缓存（标定日 D−1，无前视）。
+    """统一口径光伏预测（144 槽，kW）：三源凸加权，EWMA h=5 权重（无前视）。
 
-    与 :meth:`AdaptiveWeightModel.forecast` 完全同源（直接对 144 槽加权）：
-        P̂ = u1·P(D−1) + u2·P(D−2) + u3·典型日，再裁剪非负。
-    若 data 含 "U_SMOOTH"（平滑权重序列），优先使用；
-    若 data 含 "PV_OVERRIDE"（{day: 144 槽 kW}），该日直接返回外部预报（供 DL 试验）。
+    与 ``consistency.py`` 一致：P̂ = u1·P(D−1) + u2·P(D−2) + u3·典型日，裁剪非负；
+    权重取 ``data["EWMA_WU"][D]``（旧数据若无该字段回退 U_SMOOTH/TH）。
     """
     if "PV_OVERRIDE" in data and D in data["PV_OVERRIDE"]:
         return np.clip(np.asarray(data["PV_OVERRIDE"][D], dtype=float), 0.0, None)
-    if "U_SMOOTH" in data:
+    if D < 2:
+        return np.clip(np.asarray(data["pv_typ"], dtype=float), 0.0, None)
+    if "EWMA_WU" in data and D in data["EWMA_WU"]:
+        u = data["EWMA_WU"][D][1]
+    elif "U_SMOOTH" in data:
         u = data["U_SMOOTH"][D]
     else:
         u = softmax(data["TH"][D - 1, 3:6])
     pv, typ = data["pv_act"], data["pv_typ"]
     return np.clip(u[0] * pv[D - 1] + u[1] * pv[D - 2] + u[2] * typ, 0.0, None)
+
+
+def hist_load_forecast(data: dict, D: int) -> np.ndarray:
+    """统一口径负荷预测（144 槽，kW）：同星期几/两周前/典型日三源凸加权。
+
+    权重取 ``data["EWMA_WU"][D]``（EWMA h=5，只用 D−1 及更早信息）；
+    目标日实际负荷只用于执行回放与残差统计。
+    """
+    if D < 14:
+        return np.clip(np.asarray(data["load_typ"], dtype=float), 0.0, None)
+    if "EWMA_WU" in data and D in data["EWMA_WU"]:
+        w = data["EWMA_WU"][D][0]
+    else:
+        w = softmax(data["TH"][D - 1, :3])
+    load, typ = data["load"], data["load_typ"]
+    d7, d14 = max(0, D - 7), max(0, D - 14)
+    return np.clip(w[0] * load[d7] + w[1] * load[d14] + w[2] * typ, 0.0, None)
+
+
+def hist_forecast_asof(data: dict, target_D: int, asof_D: int) -> np.ndarray:
+    """在 ``asof_D`` 日 0:00 预测目标日光伏，禁止读取当日及以后实际值。
+
+    两日滚动时 ``target_D=asof_D+1``，附件 3 尚无次日 0:00 预报，因此沿用
+    当日已冻结的 EWMA 权重与截至 ``asof_D-1`` 的最近两条实际日曲线。
+    """
+    if target_D == asof_D:
+        return hist_forecast(data, target_D)
+    if target_D < asof_D or target_D > asof_D + 1:
+        raise ValueError("历史光伏预测仅支持当前日或次日两日窗口")
+    if asof_D < 2:
+        return np.clip(np.asarray(data["pv_typ"], dtype=float), 0.0, None)
+    if "EWMA_WU" in data and asof_D in data["EWMA_WU"]:
+        u = data["EWMA_WU"][asof_D][1]
+    elif "U_SMOOTH" in data:
+        u = data["U_SMOOTH"][asof_D]
+    else:
+        u = softmax(data["TH"][max(asof_D - 1, 13), 3:6])
+    pv, typ = data["pv_act"], data["pv_typ"]
+    d1, d2 = max(0, asof_D - 1), max(0, asof_D - 2)
+    return np.clip(u[0] * pv[d1] + u[1] * pv[d2] + u[2] * typ, 0.0, None)
+
+
+def hist_load_forecast_asof(data: dict, target_D: int, asof_D: int) -> np.ndarray:
+    """在 ``asof_D`` 日 0:00 预测当前/次日负荷（两日窗口，无前视）。"""
+    if target_D < asof_D or target_D > asof_D + 1:
+        raise ValueError("历史负荷预测仅支持当前日或次日两日窗口")
+    if asof_D < 14:
+        return np.clip(np.asarray(data["load_typ"], dtype=float), 0.0, None)
+    if "EWMA_WU" in data and asof_D in data["EWMA_WU"]:
+        w = data["EWMA_WU"][asof_D][0]
+    else:
+        w = softmax(data["TH"][asof_D - 1, :3])
+    load, typ = data["load"], data["load_typ"]
+    d7, d14 = max(0, target_D - 7), max(0, target_D - 14)
+    if d7 >= asof_D or d14 >= asof_D:
+        raise RuntimeError("两日负荷预测读取了尚未实现的实际日")
+    return np.clip(w[0] * load[d7] + w[1] * load[d14] + w[2] * typ, 0.0, None)
 
 
 # ---------------------------------------------------------------------------

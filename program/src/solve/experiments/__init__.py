@@ -12,6 +12,7 @@
     uv run python -m solve.experiments.q3_proto_rt     # Q3 实时对比
     uv run python -m solve.experiments.q4_price_eda    # 附件 4 电价 EDA
     uv run python -m solve.experiments.q4_price_dyn    # β 动态修正验证
+    uv run python -m solve.experiments.exec_policy_probe  # 执行器段末目标对照探针
 说明：正式脚本仍在 solve/ 顶层（q1~q4、q2_tune、q2_adaptive、q3_sensitivity、
 q3_ablation、q4_price_fit、q3_proto 门面）；本包脚本复用顶层门面与子包实现。
 """

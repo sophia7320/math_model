@@ -27,19 +27,42 @@ import numpy as np
 import pandas as pd
 
 import program as pm
-from solve.common import EMERG_MULT, EPS_TH, ROOT, T
-from solve.core.lp import adjust_day, adjust_day_hedge, exec_day, exec_segment_hindsight
-from solve.core.residual import causal_residual_pool, latest_forecast
+from solve.common import E0, EMERG_MULT, EPS_TH, ROOT, T
+from solve.core.causal import (
+    exec_day_causal,
+    exec_segment_causal,
+    run_exec,
+)
+from solve.core.lp import (
+    adjust_day,
+    adjust_day_hedge,
+    exec_day,
+    exec_segment_hindsight,
+    plan_day,
+    plan_horizon,
+)
+from solve.core.residual import (
+    causal_residual_pool,
+    forecast_at_publish,
+    latest_forecast,
+)
 from solve.core.slots import fc_slots
 from solve.data.attachments import load_extended
 from solve.flows.q3_day import (
     forecast_residual,
+    joint_residual_blocks,
     perfect_day,
+    plan_two_day,
     simulate_day,
     simulate_day_rt,
     simulate_day_rt_hedge,
 )
-from solve.models.adaptive import hist_forecast
+from solve.models.adaptive import (
+    hist_forecast,
+    hist_forecast_asof,
+    hist_load_forecast,
+    hist_load_forecast_asof,
+)
 from solve.models.weights import make_smooth_u
 from solve.models.weights import softmax as _softmax
 

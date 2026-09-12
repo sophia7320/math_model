@@ -1,12 +1,13 @@
 """C 题 问题三：预报驱动的日内调整（三层结算）——主方案、result3 与图表。
 
 主方案（探索结论，见 reports/Q3_方案探索报告.md 与 预测目标专题）：
-- 0:00 计划：组合预测 λ·官方f0 + (1−λ)·历史口E，λ=0.7；历史权重参数平滑 β=0.1
-- 6/12/18 调整：同组合口径的最新预报重优化未执行时段（6:00 决策 [6,12)，
-  12:00 决策 [12,18)，18:00 决策 [18,24)）
-- 6:00/12:00 调整叠加场景对冲（残差块仅取自目标日之前，10 情景）
-- 执行：逐槽因果（core.causal.exec_segment_causal，段末储能跟踪规划轨迹），
-  缺口按 5 倍交易时刻电价紧急购电
+- 0:00 计划：组合预测 λ·官方f0 + (1−λ)·历史口E，λ=0.7；历史权重 EWMA h=5
+- 6/12/18 调整：同组合口径的最新预报重优化未执行时段（口径 A：6:00 重优化 [6,24)、
+  12:00 重优化 [12,24)、18:00 重优化 [18,24)，只承诺执行未来 6 h）
+- 6:00/12:00 调整叠加场景对冲（残差块仅取自目标日之前，40 情景）
+- 储能：2 日预测窗口，每日只执行首日；日末 SOC 自由并跨日传递，规划窗口末端完全自由
+  （不锚定终值）
+- 执行：逐槽因果 free（q2.exec_segment_causal，无段末硬目标），缺口按 5 倍交易时刻电价紧急购电
 - 结算：费用 = Σ[p·x_adj + 0.5·p·|x_plan − x_adj|] + 5·Σ p·e
 
 # ===========================================================================
@@ -34,61 +35,71 @@ import numpy as np
 import pandas as pd
 
 import program as pm
+from solve import consistency as cs
 from solve import q2
 from solve import q3_proto as qp
 from solve.common import ROOT, T
 from solve.io.excel import verify_result3, write_result3
 from solve.io.report import record
 
-LAM = 0.7           # 0:00 组合权重（官方占比）
+LAM = 0.7           # 0:00 组合权重（官方占比；统一结构下重选见 q3e_tune_unified）
 ADJ_LAM = 0.7       # 调整层组合权重
-BETA = 0.1          # 历史权重平滑系数
-N_SCEN = 10         # 对冲情景数
+N_SCEN = cs.N_SCEN  # 对冲情景数（统一口径：40；唯一参数源 consistency.py）
 SEED = 7
 DAY_START = q2.REPORT_START      # 31（2025-02-01）
 N_Q3 = q2.N_DAY - DAY_START      # 334
 
 
-def _day_result(data, D, **kw):
-    """主方案单日：组合预测 λ=0.7 + 调整层 λ=0.7 + 无前视对冲（10 情景）。"""
-    r = qp.simulate_day_rt_hedge(data, D, LAM, adj_lam=ADJ_LAM, n_scen=N_SCEN, seed=SEED, **kw)
+def _day_result(data, D, e_start, **kw):
+    """主方案单日：组合预测 λ=0.7 + 调整层 λ=0.7 + 无前视对冲（40 情景）。"""
+    r = qp.simulate_day_rt_hedge(
+        data, D, LAM, adj_lam=ADJ_LAM, n_scen=N_SCEN, seed=SEED,
+        e_start=e_start, **kw,
+    )
     return r
 
 
 def run_main(data):
-    """主方案全年模拟，返回明细矩阵与逐日表。
+    """主方案全年模拟，返回明细矩阵与逐日表（日末 SOC 跨日传递）。
 
-    输出矩阵形状 (N_Q3, T)：xp 计划购电、xa 调整购电、c/d 充放、E 执行储电量、e 紧急。
+    输出矩阵形状 (N_Q3, T)：xp 计划购电、xa 调整购电、c/d 充放、E 执行储电量、e 紧急；
+    另含 E_start（每日日初 SOC，写入结果表充放电页）。
     """
     days = list(range(DAY_START, DAY_START + N_Q3))
     out = {k: np.zeros((N_Q3, T)) for k in ("xp", "xa", "c", "d", "E", "e")}
+    out["E_start"] = np.zeros(N_Q3)
     rows = []
     t0 = time.time()
+    E = float(qp.E0)
     for i, D in enumerate(days):
-        r = _day_result(data, D)
+        r = _day_result(data, D, E)
         out["xp"][i] = r["x_plan"]; out["xa"][i] = r["x_final"]
         out["c"][i] = r["c"]; out["d"][i] = r["d"]
         out["E"][i] = r["E_exec"]; out["e"][i] = r["e"]
+        out["E_start"][i] = r["E_start"]
         rows.append({"日期": data["dates"][D], "计划费/元": r["plan_cost"],
                      "调整净额/元": r["adjust_net"], "紧急费/元": r["emerg"],
                      "总费用/元": r["total"], "紧急量/kWh": float(r["e"].sum()),
                      "调整量/kWh": float(np.abs(r["x_final"] - r["x_plan"]).sum()),
                      "场景最大日序号": int(r.get("scenario_max_day", -1)),
                      "场景数": int(r.get("scenario_count", 0))})
+        E = float(r["E_end"])
         if (i + 1) % 50 == 0:
             print(f"  主方案 {i + 1}/{N_Q3} 天，用时 {time.time() - t0:.0f}s")
     return {k: v for k, v in out.items()}, pd.DataFrame(rows)
 
 
 def run_baseline(data, tag, **kw):
-    """基线模拟（λ=1 官方，无对冲），用于对照。"""
+    """基线模拟（λ=1 官方，无对冲），用于对照（日末 SOC 跨日传递）。"""
     days = list(range(DAY_START, DAY_START + N_Q3))
     xa = np.zeros((N_Q3, T)); e = np.zeros((N_Q3, T))
     tot = plan = adj = em = 0.0
+    E = float(qp.E0)
     for i, D in enumerate(days):
-        r = qp.simulate_day_rt(data, D, 1.0, **kw)
+        r = qp.simulate_day_rt(data, D, 1.0, e_start=E, **kw)
         xa[i] = r["x_final"]; e[i] = r["e"]
         tot += r["total"]; plan += r["plan_cost"]; adj += r["adjust_net"]; em += r["emerg"]
+        E = float(r["E_end"])
     print(f"  {tag}: 总 {tot / 1e4:.1f} 万（计划 {plan / 1e4:.1f} + 调整 {adj / 1e4:+.1f} + 紧急 {em / 1e4:.1f}）")
     return {"total": tot, "plan": plan, "adj": adj, "emerg": em, "e": e, "xa": xa}
 
@@ -127,9 +138,7 @@ def main():
     pm.init(seed=42, root=str(ROOT))
     log = pm.get_logger("q3")
     t0 = time.time()
-    data = qp.load_extended()
-    # 历史权重参数平滑 β=0.1（只对抖动的 W=1 光伏权重有效，见 Q2E 回测结论）
-    data["U_SMOOTH"] = qp.make_smooth_u(data, BETA)
+    data = qp.load_extended()  # 含 EWMA h=5 统一权重（consistency.py）
     print("基线对照……")
     base_noadj = run_baseline(data, "无调整（官方）", adj_hours=())
     base_off = run_baseline(data, "三点调整（官方）")
@@ -171,9 +180,15 @@ def main():
             **chk,
         },
         note=(
-            "主方案：0:00 计划用组合预测（λ=0.7·官方f0 + 0.3·历史口E，历史权重参数平滑 β=0.1）；"
+            f"统一口径（consistency.py）：负荷使用目标日前 EWMA h=5 权重预测并抬升 "
+            f"κ={cs.KAPPA:g}，"
+            f"0:00 光伏用组合预测（λ={LAM:g}·官方f0 + {1 - LAM:g}·历史 EWMA）"
+            f"并折减 m={cs.MARGIN:g} kW；"
             "6/12/18 点用同组合口径的最新预报调整；6:00/12:00 叠加无前视场景对冲"
-            "（残差块仅取自目标日之前，10 情景）；逐槽因果执行（q2.exec_segment_causal，"
+            f"（（Δ负荷, Δ光伏）同月整日联合残差块，{N_SCEN} 情景）；"
+            "储能采用 2 日预测窗口滚动优化，当前日末 SOC 不固定并传递到下一日，"
+            "规划窗口末端完全自由（不锚定终值）；"
+            "逐槽因果执行（q2.exec_segment_causal，"
             "不读取未来实际值），缺口 5 倍紧急。结算 = Σ[p·x_adj + 0.5p|x_plan−x_adj|] + 5Σp·e。"
             "result3.xlsx 已生成并回读校验；图 figures/Q3_策略费用对比.pdf、Q3_逐日紧急购电.pdf、"
             "Q3_调整量分布.pdf；逐日表 code/outputs/q3_daily.csv。"

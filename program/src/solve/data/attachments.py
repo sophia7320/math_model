@@ -18,10 +18,10 @@ import numpy as np
 import pandas as pd
 
 import program as pm
+from solve import consistency as cs
 from solve.common import DATA_C, N_DAY, ROOT
 from solve.models.errors import mu, sigma
-from solve.models.price import BETA
-from solve.models.weights import make_smooth_u
+from solve.models.weights import simplex_grid
 
 
 def load_all() -> dict:
@@ -34,9 +34,11 @@ def load_all() -> dict:
     load = ldf.iloc[:, 1:145].to_numpy(float)
     pv_act = pdf.iloc[:, 1:145].to_numpy(float)
 
-    # ---- 附件 1：典型日电价（逐槽）----
+    # ---- 附件 1：典型日电价（逐槽）+ 典型日负荷/光伏（统一口径用）----
     a1 = pm.read_table(DATA_C / "附件1.xlsx")
     price = a1["电价"].to_numpy(float)
+    load_typ = a1["小区负载"].to_numpy(float)
+    pv_typ = a1["光伏发电预测功率"].to_numpy(float)
 
     # ---- 附件 3：0:00 发布的 24 点光伏预报，按日期块归并到天 ----
     fc3 = pm.read_table(DATA_C / "附件3.xlsx")
@@ -57,13 +59,15 @@ def load_all() -> dict:
         for m in range(1, 13):
             typ_hm[k, m] = col[months == m].mean()
 
-    # ---- 标准化误差日块 Z[d, k]（0:00 预报，k=1..24） ----
+    # ---- 标准化误差日块 Z[d, k]（0:00 预报，k=1..24）----
     Z = np.zeros((N_DAY, 24))
+    R0 = np.zeros((N_DAY, 24))  # 原始残差：预报 − 实际（用于严格因果块重采样）
     ks = np.arange(1, 25)
     for i in range(N_DAY):
         m = months[i]
         typ = typ_hm[1:25, m]
         err = fc0[i] - pv_act[i, 6 * ks - 1]
+        R0[i] = err
         mask = typ > 100
         zz = np.zeros(24)
         zz[mask] = (err[mask] / typ[mask] - mu(ks[mask])) / sigma(ks[mask])
@@ -71,7 +75,8 @@ def load_all() -> dict:
 
     return {
         "dates": dates, "load": load, "pv_act": pv_act, "price": price,
-        "fc0": fc0, "months": months, "typ_hm": typ_hm, "Z": Z,
+        "fc0": fc0, "months": months, "typ_hm": typ_hm, "Z": Z, "R0": R0,
+        "load_typ": load_typ, "pv_typ": pv_typ,
     }
 
 
@@ -95,10 +100,12 @@ def load_extended() -> dict:
             fc[h][day] = r.iloc[2:26].astype(float).to_numpy()
     data["fc6"], data["fc12"], data["fc18"] = fc[6], fc[12], fc[18]
 
-    # ---- 附件 1：典型日光伏（列名兼容两种模板）----
+    # ---- 附件 1：典型日光伏/负荷（列名兼容两种模板）----
     a1 = pm.read_table(DATA_C / "附件1.xlsx")
     pv_col = "光伏发电预测功率" if "光伏发电预测功率" in a1.columns else a1.columns[3]
+    load_col = "小区负载" if "小区负载" in a1.columns else a1.columns[2]
     data["pv_typ"] = a1[pv_col].to_numpy(float)
+    data["load_typ"] = a1[load_col].to_numpy(float)
 
     # ---- 口径 E 历史权重 TH（取最新 q2e 表；无 tag 兼容旧表）----
     cache_dir = ROOT / "code" / "outputs" / "cache" / "q2e"
@@ -116,18 +123,21 @@ def load_extended() -> dict:
             break
     if npz_path is None:
         npz_path = files[0]
-    data["TH"] = np.load(npz_path)["TH"]
+    _z = np.load(npz_path)
+    data["TH"] = _z["TH"]
+    # 统一口径（consistency.py）：EWMA h=5 逐日权重（负荷/光伏），全项目共用；
+    # 覆盖 [15, 365)——日序 <31 的权重仅用于场景池残差的名义预测（无前视）。
+    data["EWMA_WU"] = cs.ewma_weights_from_table(
+        _z["C"], simplex_grid(0.2), first_target=cs.WARM_FROM + 1)
     return data
 
 
 def load_q4_data() -> tuple[dict, np.ndarray, np.ndarray]:
-    """附件 1/2/3 + 附件 4 电价 + 平滑历史权重。
+    """附件 1/2/3 + 附件 4 电价 + 统一 EWMA h=5 权重（consistency.py）。
 
     返回 (data, p4, p_typ)：p4 为附件 4 逐槽实时电价，p_typ 为典型日电价。
     """
     data = load_extended()
-    # 光伏历史权重参数平滑 β=0.1（Q3/Q4 主方案口径）
-    data["U_SMOOTH"] = make_smooth_u(data, BETA)
     df4 = pm.read_table(DATA_C / "附件4.xlsx")
     p4 = df4.iloc[:, 1:145].to_numpy(float)
     return data, p4, data["price"]

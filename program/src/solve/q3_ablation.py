@@ -16,12 +16,13 @@ import numpy as np
 import pandas as pd
 
 import program as pm
+from solve import consistency as cs
 from solve import q3_proto as qp
 from solve.common import ROOT
 from solve.io.report import record
 
-BETA = 0.1
-N_SCEN = 10
+# 统一口径：EWMA 权重由 load_extended() 提供；情景数取唯一参数源。
+N_SCEN = cs.N_SCEN
 SEED = 7
 LAM = 0.7
 DAYS = list(range(31, 365))
@@ -48,8 +49,7 @@ def run_cfg(tag, fn, *, lam, adj_lam, hedge, data):
 
 def main():
     pm.init(seed=42, root=str(ROOT))
-    data = qp.load_extended()
-    data["U_SMOOTH"] = qp.make_smooth_u(data, BETA)
+    data = qp.load_extended()  # 含统一 EWMA 权重（EWMA_WU）
     print("Q3 消融（因果口径，334 天）：")
     rows = [
         run_cfg("官方·三点+对冲", qp.simulate_day_rt_hedge,

@@ -34,12 +34,19 @@ def sigma(k):
 def scenario_hourly(fc0_row, month, z_row, typ_hm) -> np.ndarray:
     """由标准化误差块生成情景小时序列（裁剪到 ≥0）。
 
-    P̂_k = F_k + T_k·(μ_k + σ_k·z_k)，其中 k = 1..24（整点口径）。
+    P̂_k = F_k − T_k·(μ_k + σ_k·z_k)，其中 k = 1..24（整点口径）。
+    注意 err = 预报 − 实际，因此实际情景 = 预报 − err。
     """
     ks = np.arange(1, 25)
     typ = typ_hm[1:25, month]
     err = typ * (mu(ks) + sigma(ks) * z_row)
-    return np.clip(fc0_row + err, 0.0, None)
+    return np.clip(fc0_row - err, 0.0, None)
+
+
+def scenario_from_residual(fc0_row, residual_row) -> np.ndarray:
+    """由原始残差块生成小时实际情景；残差定义为"预报 − 实际"。"""
+    return np.clip(np.asarray(fc0_row, float) - np.asarray(residual_row, float),
+                   0.0, None)
 
 
 # 兼容别名（旧调用点）

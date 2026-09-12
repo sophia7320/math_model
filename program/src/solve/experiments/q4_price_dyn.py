@@ -18,7 +18,9 @@ import pandas as pd
 import program as pm
 from solve import q2
 from solve.common import DATA_C, E0, ROOT
-from solve.models.price import forecast_price, rolling_v_star
+from solve.data.attachments import load_extended
+from solve.models.adaptive import hist_forecast_asof, hist_load_forecast_asof
+from solve.models.price import forecast_price, forecast_price_next_asof, rolling_v_star
 
 DAY_START = q2.REPORT_START
 N_DAY = q2.N_DAY
@@ -27,7 +29,7 @@ N_DAY = q2.N_DAY
 def run_year_vseq(p4, p_typ, data, v_seq):
     """按给定 v 序列模拟全年（v_seq: {day: v}；缺省天用纯典型日），返回 334 天费用。
 
-    结算：Σ p4·x + 5·Σ p4·e（附件 4 真实价）；储能跨日连续、逐槽因果执行。
+    统一口径：48 小时滚动计划（末端自由）+ 逐槽因果执行；结算用附件 4 真实价。
     """
     load = data["load"]; pv_act = data["pv_act"]; fc0 = data["fc0"]
     E = E0
@@ -35,9 +37,19 @@ def run_year_vseq(p4, p_typ, data, v_seq):
     for D in range(N_DAY):
         v = v_seq.get(D, (0.0, 0.0, 1.0))
         p_hat = forecast_price(D, v, p4, p_typ) if D >= 7 else p_typ
-        x, _E_plan, _ = q2.plan_day(p_hat, load[D] / 6.0,
-                                    q2._hour_to_slots(fc0[D]) / 6.0, E, eps=1e-3)
-        ex = q2.exec_day_causal(p4[D], load[D] / 6.0, pv_act[D] / 6.0, x, E)
+        p_hat1 = forecast_price_next_asof(D, v, p4, p_typ)
+        xh, Eh, _ = q2.plan_horizon(
+            np.concatenate([p_hat, p_hat1]),
+            np.concatenate([hist_load_forecast_asof(data, D, D),
+                            hist_load_forecast_asof(data, D + 1, D)]) / 6.0,
+            np.concatenate([q2._hour_to_slots(fc0[D]),
+                            hist_forecast_asof(data, D + 1, D)]) / 6.0,
+            E, None, eps=1e-3,
+        )
+        x, e_day_end = xh[:q2.T], float(Eh[q2.T - 1])
+        ex = q2.exec_day_causal(
+            p4[D], load[D] / 6.0, pv_act[D] / 6.0, x, E, e_end=e_day_end
+        )
         E = float(ex["E"][-1])
         if D >= DAY_START:
             tot += float(p4[D] @ x + q2.EMERG_MULT * (p4[D] @ ex["e"]))
@@ -46,7 +58,7 @@ def run_year_vseq(p4, p_typ, data, v_seq):
 
 def main():
     pm.init(seed=42, root=str(ROOT))
-    data = q2.load_all()
+    data = load_extended()
     p_typ = data["price"]
     df4 = pm.read_table(DATA_C / "附件4.xlsx")
     p4 = df4.iloc[:, 1:145].to_numpy(float)

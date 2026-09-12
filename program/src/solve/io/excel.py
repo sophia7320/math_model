@@ -141,10 +141,13 @@ def verify_result2(path, df: pd.DataFrame) -> dict:
 
     ws = wb["充放电量"]
     rows = [r for r in ws.iter_rows(min_row=2, values_only=True) if r[1] is not None]
-    e_vals = [float(r[5]) for r in rows if r[4] in ("00:00", "24:00") and r[5] is not None]
     checks["充放表行数"] = len(rows)
-    checks["储能端点最大偏离6000/kWh"] = (
-        float(max(abs(v - 6000.0) for v in e_vals)) if e_vals else -1.0)
+    e0 = [float(rows[6 * i][5]) for i in range(len(rows) // 6)]
+    e24 = [float(rows[6 * i + 1][5]) for i in range(len(rows) // 6)]
+    checks["跨日SOC衔接最大误差/kWh"] = (
+        float(max(abs(e24[i] - e0[i + 1]) for i in range(len(e0) - 1)))
+        if len(e0) > 1 else 0.0)
+    checks["日末SOC非固定取值数"] = len(set(round(v, 3) for v in e24))
 
     ws = wb["紧急购电量"]
     kw = sum(float(r[2]) for r in ws.iter_rows(min_row=2, values_only=True)
@@ -168,7 +171,8 @@ def write_result3(dates, price, out):
     _fill_adjust_sheet(wb["调整购电量"], [out["xa"][i] for i in rep],
                        [out["xp"][i] for i in rep], [price] * n_q3)
     _fill_charge_sheet(wb["充放电量"], [
-        (_to_dt(dates[i0 + i]), out["c"][i], out["d"][i], 6000.0, out["E"][i, -1])
+        (_to_dt(dates[i0 + i]), out["c"][i], out["d"][i],
+         out["E_start"][i], out["E"][i, -1])
         for i in rep
     ])
     _fill_emergency_sheet(wb["紧急购电量"],
@@ -202,8 +206,12 @@ def verify_result3(path, dates, price, out):
     ws = wb["充放电量"]
     rows = [r for r in ws.iter_rows(min_row=2, values_only=True) if r[1] is not None]
     chk["充放表行数"] = len(rows)
-    ev = [float(r[5]) for r in rows if r[4] in ("00:00", "24:00") and r[5] is not None]
-    chk["储能端点最大偏离6000/kWh"] = float(max(abs(v - 6000.0) for v in ev))
+    e0 = [float(rows[6 * i][5]) for i in range(n_q3)]
+    e24 = [float(rows[6 * i + 1][5]) for i in range(n_q3)]
+    chk["跨日SOC衔接最大误差/kWh"] = float(
+        max(abs(e24[i] - e0[i + 1]) for i in range(n_q3 - 1))
+    )
+    chk["日末SOC非固定取值数"] = int(len(set(round(v, 3) for v in e24)))
 
     ws = wb["紧急购电量"]
     kw = sum(float(r[2]) for r in ws.iter_rows(min_row=2, values_only=True) if r[2] is not None)

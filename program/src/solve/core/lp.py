@@ -50,21 +50,31 @@ from solve.common import (
 #     ε=0 时与"纯购电费最小"完全一致（计划 LP）；ε>0 在等费用平面上
 #     唯一化充放方案，供口径 E 标定与 Q3/Q4 使用。
 # ===========================================================================
-def plan_lp(price_h, load_h, pv_h, e_start, e_terminal, eps=0.0):
+def plan_lp(price_h, load_h, pv_h, e_start, e_terminal=None, eps=0.0):
     """统一计划 LP：返回完整解字典与 OptResult。
 
+    ``e_terminal=None``（统一口径默认）时规划窗口末端完全自由（不锚定终值）；
+    传入数值时只约束视野最远端 E(H)=e_terminal（供结构对照）。
+    中间每个自然日的末端 SOC 都是优化变量；每日只执行前 144 槽，
+    次日以真实末端 SOC 重新求解。
     解字典键：x 购电、c 充、d 放、s 弃光、E 储电量（均为长度 H 数组）。
     """
+    price_h = np.asarray(price_h, dtype=float)
+    load_h = np.asarray(load_h, dtype=float)
+    pv_h = np.asarray(pv_h, dtype=float)
     H = len(price_h)
+    if len(load_h) != H or len(pv_h) != H:
+        raise ValueError("price/load/pv 的滚动视野长度必须一致")
     n = 5 * H
     c_obj = np.zeros(n)
     # 目标函数：仅购电量 x 按电价计费；c/d 加 ε 罚项抑制无意义充放
     c_obj[0:H] = price_h
     c_obj[H:3 * H] = eps
 
-    # ---- 等式约束行布局：[0, H) 功率平衡；[H, 2H) 储能动态；第 2H 行终端条件 ----
-    A_eq = lil_matrix((2 * H + 1, n))
-    b_eq = np.zeros(2 * H + 1)
+    # ---- 等式约束行布局：[0, H) 平衡；[H, 2H) 动态；可选第 2H 行终端条件 ----
+    n_rows = 2 * H + (1 if e_terminal is not None else 0)
+    A_eq = lil_matrix((n_rows, n))
+    b_eq = np.zeros(n_rows)
     for t in range(H):
         # 功率平衡：+x_t + d_t − c_t − s_t = L_t − P_t
         A_eq[t, 0 * H + t] = 1.0
@@ -81,9 +91,10 @@ def plan_lp(price_h, load_h, pv_h, e_start, e_terminal, eps=0.0):
         A_eq[r, 1 * H + t] = -ETA
         A_eq[r, 2 * H + t] = 1.0 / ETA
         b_eq[r] = e_start if t == 0 else 0.0
-    # 终端条件：E_{H-1} = e_terminal（日循环或跨日循环）
-    A_eq[2 * H, 4 * H + H - 1] = 1.0
-    b_eq[2 * H] = e_terminal
+    # 终端条件（可选）：E_{H-1} = e_terminal（日循环/跨日循环锚定）
+    if e_terminal is not None:
+        A_eq[2 * H, 4 * H + H - 1] = 1.0
+        b_eq[2 * H] = float(e_terminal)
 
     # 变量边界：x∈[0,∞)，c,d∈[0,P̄]，s∈[0,该槽可用光伏]，E∈[E_min,E_max]
     bounds = (
@@ -116,10 +127,15 @@ def plan_day(price, load_kwh, pv_kwh, e_start, eps=0.0):
     return sol["x"], sol["E"], res
 
 
-def plan_horizon(price_h, load_h, pv_h, e_start, e_terminal, eps=1e-3):
-    """多日计划 LP：min Σp·x + eps·Σ(c+d)；储能跨日连续 E(0)=e_start、E(H)=e_terminal。"""
-    sol, _res = plan_lp(price_h, load_h, pv_h, e_start, e_terminal, eps)
-    return sol["x"], sol["E"]
+def plan_horizon(price_h, load_h, pv_h, e_start, e_terminal=None, eps=0.0):
+    """有限视野计划 LP；正式滚动策略使用 2 日（288 槽）视野。
+
+    默认末端完全自由（``e_terminal=None``，统一口径）；传入数值时锚定
+    E(H)=e_terminal（供结构对照）。返回 ``(x, E, res)``。
+    每日只执行前 144 槽，次日以真实末端 SOC 重新求解。
+    """
+    sol, res = plan_lp(price_h, load_h, pv_h, e_start, e_terminal, eps)
+    return sol["x"], sol["E"], res
 
 
 # ===========================================================================
@@ -304,10 +320,13 @@ def adjust_day(price, load_kwh, pv_fc_kwh, x_plan, e_init, t0, eps=EPS_TH, e_ter
 #
 #     变量块顺序：[ adj | y | (c_s,d_s,s_s,E_s,e_s) for s=1..S ]
 # ===========================================================================
-def adjust_day_hedge(price, load_kwh, pv_scens, x_plan, e_init, t0, eps=EPS_TH, e_terminal=E0):
+def adjust_day_hedge(price, load_kwh, pv_scens, x_plan, e_init, t0, eps=EPS_TH,
+                     e_terminal=E0, load_scens=None):
     """调整 LP（场景对冲）：adj 为第一阶段共享决策；每场景储能/紧急独立。
 
     e_terminal：段末（当天 24:00）目标储电量（各场景同值），默认 E0。
+    load_scens ：每场景负荷（list，长度 m；None 时所有场景共用 ``load_kwh``）；
+                 统一口径下与 ``pv_scens`` 一起由（Δ负荷, Δ光伏）联合残差块构造。
 
     pv_scens : list，第 0 个为名义预测（用于返回基准储能轨迹），其余为扰动场景；
                每个元素是长度 m = T−t0 的 kWh/槽数组。
@@ -351,7 +370,8 @@ def adjust_day_hedge(price, load_kwh, pv_scens, x_plan, e_init, t0, eps=EPS_TH, 
             A_eq[r, b0 + m + i] = 1.0
             A_eq[r, b0 + 2 * m + i] = -1.0
             A_eq[r, b0 + 4 * m + i] = 1.0
-            b_eq[r] = load_kwh[t0 + i] - pv_scens[s][i]
+            b_eq[r] = ((load_kwh[t0 + i] if load_scens is None
+                        else load_scens[s][i]) - pv_scens[s][i])
             r += 1
         for i in range(m):
             # 情景 s 的储能动态
