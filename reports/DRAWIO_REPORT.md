@@ -6,6 +6,7 @@
 | --- | --- | --- | --- | --- |
 | `figures/技术路线图.drawio` / `.pdf` / `.png` / `.content.json` | 五带技术路线图（scibox-diagram 模板 `roadmap-5band`） | `reports/ANALYSIS_MODELING_REPORT.md`、`reports/RESULTS_REPORT.md` | 论文「问题分析/总体框架」节；一页概览四问递进与统一建模引擎 | ✅ 已导出 |
 | `figures/Q2改进模型_流程图.drawio` / `.pdf` / `.png` | 手写 XML 纵向流程图（scibox-diagram 路径 B） | `reports/Q2_参数与分布结构专题.md`、`solve/q2e_structure.py`/`q2_tune.py` | 第二问改进模型（EWMA 标定 + κ/m 裕度 + 因果执行）的公式级流程说明；可作论文 Q2 模型图 | ✅ 已导出 |
+| `figures/模型一图流.drawio` / `.pdf` / `.png` | 手写 XML 全模型总览（2400×1460 横版，四问泳道 + 共用机制带 + 验证交付带） | `reports/模型信息总表_论文手版.md`、`.opencode/skills/scibox-diagram/references/authoring.md` | 一图涵盖:数据口径 → 统一预测与风险机制 → Q1–Q4 泳道(信息/预测/计划/调整对冲/执行/结算/输出) → 验证与交付;含全部核心公式 | ✅ 已导出 |
 
 ## 未生成图示及原因
 
@@ -27,6 +28,11 @@
 - `Q2改进模型_流程图`：手写 XML（1220×1500，主列 8 盒 + 右列 2 注释 + 费用回填回路），
   体检 **0 FAIL / 0 WARN**，`-x -f pdf --crop` / `-x -f png -s 2 -b 10` 导出；
   目视两轮：修正变音符歧义（改用 `^`=预测、`′`=修正、`_typ`=典型日），现无溢出、箭头语义正确。
+- `模型一图流`：生成器脚本产出手写 XML（2400×1460；标题带 + 数据带 + 共用机制带 + 决策时序轴
+  + 四问泳道 + 验证交付带，共 102 图元；母线式 B→C→四问分流，泳道内 7 盒串联 + 左侧“递进”箭头）；
+  体检 **0 FAIL / 0 WARN**（一次行超宽与字号层级已修）；导出 `-x -f pdf --crop` /
+  `-x -f png -s 1 --crop`；目视整图 + 四处 2× 放大（Q1 约束盒、Q3 对冲公式盒、题面参数盒、
+  κ/m 与联合残差盒）均无溢出、无压线、字号层级 3 档（13/16/20）。
 
 ## 给论文阶段的嵌入建议
 

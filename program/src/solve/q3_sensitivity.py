@@ -34,13 +34,23 @@ def _init(payload):
 
 
 def _task(t):
-    vi, D, n_scen, pmm, plb, lam, seed, e_start = t
-    r = qp.simulate_day_rt_hedge(
-        _P, D, lam, adj_lam=lam, n_scen=n_scen, seed=seed,
-        pool_min_month=pmm, pool_lookback=plb, e_start=e_start,
-    )
-    return (vi, D, float(r["plan_cost"]), float(r["adjust_net"]), float(r["emerg"]),
-            float(r["e"].sum()), int(r.get("scenario_max_day", -1)))
+    """单个变体：变体内逐日串行、执行 SOC 跨日连续（与官方主程序一致）。"""
+    vi, name, v = t
+    E = float(qp.E0)
+    plan = adj = em = em_kwh = 0.0
+    viol = 0
+    for D in DAYS:
+        r = qp.simulate_day_rt_hedge(
+            _P, D, v["lam"], adj_lam=v["lam"], n_scen=v["n_scen"], seed=v["seed"],
+            pool_min_month=v["pmm"], pool_lookback=v["plb"], e_start=E,
+        )
+        plan += float(r["plan_cost"])
+        adj += float(r["adjust_net"])
+        em += float(r["emerg"])
+        em_kwh += float(r["e"].sum())
+        viol += int(r.get("scenario_max_day", -1) >= D)
+        E = float(r["E_end"])
+    return (vi, plan, adj, em, em_kwh, viol)
 
 
 VARIANTS = [
@@ -80,19 +90,8 @@ def main():
     t0 = time.time()
     data = qp.load_extended()  # 含统一 EWMA 权重（EWMA_WU）
 
-    # 每个配置先顺序推导 2 日滚动产生的跨日 SOC；正式日模拟仍可并行，
-    # 因为逐日执行被约束到该日自由优化出的计划末端。
-    starts = np.zeros((len(VARIANTS), len(DAYS)))
-    for vi, (_, v) in enumerate(VARIANTS):
-        E = float(qp.E0)
-        for di, D in enumerate(DAYS):
-            starts[vi, di] = E
-            _x, E_plan, _ = qp.plan_two_day(data, D, v["lam"], E)
-            E = float(E_plan[-1])
-    tasks = [
-        (vi, D, v["n_scen"], v["pmm"], v["plb"], v["lam"], v["seed"], starts[vi, di])
-        for vi, (_, v) in enumerate(VARIANTS) for di, D in enumerate(DAYS)
-    ]
+    # 变体间并行、变体内逐日串行：执行 SOC 跨日连续，与官方主程序一致。
+    tasks = [(vi, name, v) for vi, (name, v) in enumerate(VARIANTS)]
     n = len(VARIANTS)
     plan = np.zeros(n)
     adj = np.zeros(n)
@@ -103,15 +102,14 @@ def main():
     from multiprocessing import Pool
 
     with Pool(nw, initializer=_init, initargs=(data,)) as pool:
-        for k, (vi, D, c_plan, c_adj, c_em, e_kwh, smax) in enumerate(
-                pool.imap_unordered(_task, tasks, chunksize=8), start=1):
+        for vi, c_plan, c_adj, c_em, e_kwh, n_viol in pool.imap_unordered(
+                _task, tasks, chunksize=1):
             plan[vi] += c_plan
             adj[vi] += c_adj
             em[vi] += c_em
             em_kwh[vi] += e_kwh
-            viol[vi] += int(smax >= D)
-            if k % 500 == 0:
-                print(f"  {k}/{len(tasks)}，用时 {time.time() - t0:.0f}s")
+            viol[vi] += n_viol
+            print(f"  变体 {vi + 1}/{n} 完成，用时 {time.time() - t0:.0f}s")
 
     out = pd.DataFrame({
         "配置": [name for name, _ in VARIANTS],

@@ -33,6 +33,7 @@
 - **一次性探索脚本**（依赖未进 pyproject 时）用 `--no-project` 临时注入，依赖速记：数值计算 numpy,scipy,matplotlib,pandas / 符号计算 sympy / 深度学习 torch / 读表 openpyxl。
 - 不要用裸 `python` / `pip install`，也不要手动建/激活 venv（`.venv` 由 uv 维护）。
 - 脚本含中文输出时先设 `$env:PYTHONIOENCODING='utf-8'`；控制台是 PowerShell 5.1 且默认 GBK，列/搜中文文件名先设 `[Console]::OutputEncoding=[Text.Encoding]::UTF8`，读文件内容优先用 Read/Glob/Grep 工具而非 Get-Content。
+- **报告耗时（用户要求，2026-09-13）**：每次运行程序后，在回复中说明该次运行的耗时（脚本自带计时输出的一并引用）。
 - 一次性临时脚本写到 `C:\Users\sophia\AppData\Local\Temp\opencode`，不要散落在仓库根目录。
 - **重跑防重复**：`q3.py`、`q4.py`、`q3_ablation.py`、`q2_adaptive.py`、`q2_arima.py`、`q2_tune.py`、`q3_sensitivity.py` 自带 `record()`（先删同名旧章节再追加）；其余脚本用追加模式的 `pm.record_result`，重跑前手动清理。
 - **多进程**：`solve/` 里用 `multiprocessing.Pool`（Windows 为 spawn）时，入口必须由 `if __name__ == "__main__":` 保护，否则子进程会递归导入主模块。
