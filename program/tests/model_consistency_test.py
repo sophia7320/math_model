@@ -26,8 +26,8 @@ def main() -> None:
 
     # 1) 参数值 = 规范值
     assert cs.EWMA_HL == 5.0, cs.EWMA_HL
-    assert cs.KAPPA == 1.015, cs.KAPPA
-    assert cs.MARGIN == 75.0, cs.MARGIN
+    assert cs.KAPPA == 1.02, cs.KAPPA
+    assert cs.MARGIN == 50.0, cs.MARGIN
     assert cs.N_SCEN == 40, cs.N_SCEN
     assert cs.START_DAY == 31 and cs.PLAN_HORIZON == 288
 
