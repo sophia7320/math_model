@@ -239,15 +239,34 @@ def verify_result2_file(path, model: AdaptiveWeightModel, x_plans, recs) -> dict
 
 
 # ---------------------------------------------------------------------------
-# 蒙特卡洛：年度总成本分布（固定计划、重采样整日误差块）
+# 蒙特卡洛：年度总成本分布（固定计划、重采样 E 模型残差同月整日块）
 # ---------------------------------------------------------------------------
-def run_mc(model: AdaptiveWeightModel, x_plans, targets, e_start_feb: float,
-           n_years: int = 100, seed: int = 42):
-    """固定新结构计划，对 2.1-12.31 重采样附件 3 误差日块，评估紧急费用分布。"""
-    data = model.data
+def build_residual_blocks(model: AdaptiveWeightModel, seq: dict):
+    """计划一致口径的残差块：r(d) = 计划光伏输入 − 实际（kWh/槽），及计划输入本身。"""
+    pv_plan = np.zeros((N_DAY, T))
+    r_e = np.zeros((N_DAY, T))
+    for d in range(START_SIM, N_DAY):
+        w, u = seq[d]
+        _l0, p0, _l1, _p1 = forecast_two_days(model, w, u, d)
+        p0k = np.clip(p0 - MARGIN, 0.0, None) / 6.0
+        pv_plan[d] = p0k
+        r_e[d] = p0k - model.P[d] / 6.0
+    return pv_plan, r_e
+
+
+def run_mc(model: AdaptiveWeightModel, x_plans, targets, seq: dict,
+           e_start_feb: float, n_years: int = 100, seed: int = 42,
+           min_same_month: int = 14):
+    """固定新结构计划，对 2.1-12.31 重采样 E 模型残差的同月整日块（无前视噪声源）。
+
+    场景 = 当日计划光伏输入 − 另一天的残差块（同月优先，样本不足回退全年）；
+    仅作事后风险评价，不参与在线决策；执行仍为逐槽因果（目标 = 规划末端储电量）。
+    """
     price = model.price
-    Z, months, typ_hm, fc0 = data["Z"], data["months"], data["typ_hm"], data["fc0"]
-    load = data["load"]
+    load = model.data["load"]
+    months = np.asarray(model.data["months"])
+    pv_plan, r_e = build_residual_blocks(model, seq)
+    pool_days = np.arange(START_SIM, N_DAY)
     rng = np.random.default_rng(seed)
     emerg_costs = np.zeros(n_years)
     emerg_kwhs = np.zeros(n_years)
@@ -256,9 +275,10 @@ def run_mc(model: AdaptiveWeightModel, x_plans, targets, e_start_feb: float,
     for y in range(n_years):
         E = float(e_start_feb)
         for d in REP:
-            zi = int(rng.integers(0, N_DAY))
-            pv_s = q2._hour_to_slots(
-                q2._scenario_hourly(fc0[d], months[d], Z[zi], typ_hm)) / 6.0
+            same = pool_days[months[pool_days] == months[d]]
+            pool = same if len(same) >= min_same_month else pool_days
+            ix = int(rng.choice(pool))
+            pv_s = np.clip(pv_plan[d] - r_e[ix], 0.0, None)
             try:
                 ex = q2.exec_segment_causal(
                     load[d] / 6.0, pv_s, x_plans[d], E, float(targets[d]))
@@ -412,7 +432,7 @@ def run_result2(model: AdaptiveWeightModel, seq: dict, mc_years: int = 0,
     if mc_years > 0:
         t1 = time.time()
         mc_costs, mc_kwhs, fallbacks = run_mc(
-            model, x_plans, targets, recs[REPORT_START]["E_start"],
+            model, x_plans, targets, seq, recs[REPORT_START]["E_start"],
             n_years=mc_years, seed=seed)
         total = s["_plan"] + mc_costs
         p95 = float(np.percentile(total, 95))
@@ -433,11 +453,12 @@ def run_result2(model: AdaptiveWeightModel, seq: dict, mc_years: int = 0,
             pd.DataFrame({"计划费_元": s["_plan"], "紧急费_元": mc_costs,
                           "总费用_元": s["_plan"] + mc_costs}),
             "q2_roll_mc_annual_costs")
-        mc_note = "年度分布：固定新结构计划，仅重采样附件 3 误差日块。"
+        mc_note = "年度分布：固定计划，重采样 E 模型残差（计划光伏 − 实际）的同月整日块。"
         record("问题二 年度总成本分布（2 日滚动·蒙特卡洛）", mc_stats,
-               note=("固定计划、场景重采样整日标准化误差块（保留日内相关）；"
+               note=("计划一致口径：固定新结构计划，场景 = 当日计划光伏输入 − 另一天"
+                     "（同月优先、样本≥14 天）的整日残差块，保留日内相关且不含前视；"
                      "执行仍为逐槽因果（目标 = 各日规划末端储电量）；"
-                     "图 figures/Q2_总费用分布.pdf。"))
+                     "仅作事后风险评价，不参与在线决策；图 figures/Q2_总费用分布.pdf。"))
 
     make_figures(model, recs, targets, daily, mc_costs, s["_plan"])
 

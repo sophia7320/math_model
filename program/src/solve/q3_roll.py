@@ -41,7 +41,7 @@ from solve.common import E0, E_MAX, E_MIN, ETA, P_MAX_E, RESULTS_DIR, ROOT, T
 LAM = 0.7               # 0:00 组合权重（官方占比）
 ADJ_LAM = 0.7           # 调整层组合权重
 BETA = 0.1              # 历史权重平滑系数
-N_SCEN = 10             # 对冲情景数
+N_SCEN = 40             # 对冲情景数（3 种子 10/20/40 收敛检查后由 10 升级为 40）
 SEED = 7
 START_SIM = 15          # 滚动仿真起点（日序号；前 15 天为预测/权重预热）
 N_DAY = q2.N_DAY
@@ -75,6 +75,18 @@ def hist_forecast_next(data: dict, D: int) -> np.ndarray:
     pv, typ = data["pv_act"], data["pv_typ"]
     p_hat = u[0] * pv[D - 1] + u[1] * pv[D - 2] + u[2] * typ
     return np.clip(u[0] * p_hat + u[1] * pv[D - 1] + u[2] * typ, 0.0, None)
+
+
+def hist_load_forecast_next(data: dict, D: int) -> np.ndarray:
+    """次日负荷预测（kW，144 槽，无前视）：同星期日/两周前/典型日三源。
+
+    权重沿用当日可用的 Q2E 负荷权重（TH[D−1]），输入滞后前移一天：
+    L̂(D+1)=w1·L(D−6)+w2·L(D−13)+w3·L̄。
+    """
+    j = max(D - 1, 13)
+    w = qp._softmax(data["TH"][j, :3])
+    load, typ = data["load"], data["load_typ"]
+    return np.clip(w[0] * load[D - 6] + w[1] * load[D - 13] + w[2] * typ, 0.0, None)
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +253,8 @@ def simulate_day_roll(data: dict, D: int, E_now: float, lam: float = LAM,
     （None = 自由；传入数值 = 锚定，供结构对照）。
     """
     price = data["price"]
-    load = data["load"][D] / 6.0
+    load_act = data["load"][D] / 6.0                 # 回测真值（执行/校验用）
+    load_fc = qp.hist_load_forecast(data, D) / 6.0   # 因果负荷预测（计划输入）
     pv_act = data["pv_act"][D] / 6.0
 
     f0 = q2._hour_to_slots(data["fc0"][D])
@@ -250,11 +263,11 @@ def simulate_day_roll(data: dict, D: int, E_now: float, lam: float = LAM,
     if margin:
         pv0 = pv0 * (1.0 - margin)
     D1 = min(D + 1, N_DAY - 1)
-    load1 = data["load"][D1] / 6.0
+    load1_fc = hist_load_forecast_next(data, D) / 6.0
     pv1 = hist_forecast_next(data, D) / 6.0
 
     x2, E2, _ = q2.plan_horizon(
-        np.tile(price, 2), np.concatenate([load, load1]),
+        np.tile(price, 2), np.concatenate([load_fc, load1_fc]),
         np.concatenate([pv0, pv1]), E_now, e_terminal, eps=qp.EPS_TH)
     x_plan = x2[:T].copy()
     x_seq = x2[:T].copy()
@@ -271,7 +284,7 @@ def simulate_day_roll(data: dict, D: int, E_now: float, lam: float = LAM,
     points = [0] + sorted(p * 6 for p in adj_hours) + [T]
     for a, b in zip(points[:-1], points[1:]):
         seg = q2.exec_segment_causal(
-            load[a:b], pv_act[a:b], x_seq[a:b], E_cur,
+            load_act[a:b], pv_act[a:b], x_seq[a:b], E_cur,
             float(np.clip(E_target[b - 1], E_MIN, E_MAX)))
         e_total[a:b] = seg["e"]
         c_all[a:b] = seg["c"]
@@ -286,7 +299,7 @@ def simulate_day_roll(data: dict, D: int, E_now: float, lam: float = LAM,
             m = 2 * T - t1
             nd = T - t1
             price_ext = np.concatenate([price[t1:], price])
-            load_ext = np.concatenate([load[t1:], load1])
+            load_ext = np.concatenate([load_fc[t1:], load1_fc])
             off = qp.fc_slots(data[f"fc{pub}"][D], pub)
             pv_new_full = (off if adj_lam is None
                            else np.clip(adj_lam * off + (1.0 - adj_lam) * ph, 0.0, None))
@@ -301,7 +314,7 @@ def simulate_day_roll(data: dict, D: int, E_now: float, lam: float = LAM,
                 scens = []
                 for ix in [None] + list(idxs):
                     seg_d = pv_rest if ix is None else np.clip(
-                        pv_rest - qp.forecast_residual(data, int(ix), adj_lam)[t1:],
+                        pv_rest - qp.forecast_residual(data, int(ix), pub, adj_lam)[t1:],
                         0.0, None)
                     scens.append(np.concatenate([seg_d, pv1]))
                 x_adj_ext, E_adj_ext = adjust_horizon_hedge(
