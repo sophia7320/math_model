@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" agent="opencode" version="24.7.17">
+  <diagram id="core_algorithm" name="核心算法流程图">
+    <mxGraphModel dx="700" dy="990" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="700" pageHeight="990" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="b0_input" value="&lt;b&gt;&lt;font style=&quot;font-size:17px;&quot; color=&quot;#1f3f6b&quot;&gt;输入数据（附件 1–4）&lt;/font&gt;&lt;/b&gt;&lt;br&gt;负荷 L、光伏 P、电价 p、光伏预报 f&lt;br&gt;储能：η = 0.9，E ∈ [1200, 10800] kWh，充放 ≤ 833.3 kWh/槽（Δt = 10 min）&lt;br&gt;&lt;font style=&quot;font-size:13px;&quot; color=&quot;#8a5a2b&quot;&gt;口径：Q1 用附件 1；Q2 用 1/2；Q3 用 1/2/3；Q4 用 1/2/4&lt;/font&gt;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#f2f4f6;strokeColor=#8a97a3;strokeWidth=1.5;fontSize=15;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="30" y="14" width="600" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="b1_pred" value="&lt;b&gt;&lt;font style=&quot;font-size:17px;&quot; color=&quot;#1f3f6b&quot;&gt;① 多源组合预测（0:00 发布 · 严格因果）&lt;/font&gt;&lt;/b&gt;&lt;br&gt;L̂&lt;sub&gt;d,t&lt;/sub&gt; = w&lt;sub&gt;1&lt;/sub&gt;L&lt;sub&gt;d−7,t&lt;/sub&gt; + w&lt;sub&gt;2&lt;/sub&gt;L&lt;sub&gt;d−14,t&lt;/sub&gt; + w&lt;sub&gt;3&lt;/sub&gt;L̄&lt;sub&gt;t&lt;/sub&gt;&lt;br&gt;P̂&lt;sub&gt;d,t&lt;/sub&gt; = u&lt;sub&gt;1&lt;/sub&gt;P&lt;sub&gt;d−1,t&lt;/sub&gt; + u&lt;sub&gt;2&lt;/sub&gt;P&lt;sub&gt;d−2,t&lt;/sub&gt; + u&lt;sub&gt;3&lt;/sub&gt;P̄&lt;sub&gt;t&lt;/sub&gt;&lt;br&gt;权重 (w, u)：单纯形网格搜索，按历史实现费用 EWMA 打分&lt;br&gt;M&lt;sub&gt;d&lt;/sub&gt; = ρM&lt;sub&gt;d−1&lt;/sub&gt; + (1−ρ)C&lt;sub&gt;d−1&lt;/sub&gt;，ρ = 2&lt;sup&gt;−1/5&lt;/sup&gt;（h = 5 天，只用 ≤ d−1 信息）&lt;br&gt;&lt;font style=&quot;font-size:13px;&quot; color=&quot;#8a5a2b&quot;&gt;口径：Q1 不预测（完全信息）；Q3/Q4 叠加官方预报 λf + (1−λ)P̂（λ = 0.7）&lt;/font&gt;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#eef6fd;strokeColor=#3b547f;strokeWidth=1.5;fontSize=15;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="30" y="134" width="600" height="128" as="geometry" />
+        </mxCell>
+        <mxCell id="b2_margin" value="&lt;b&gt;&lt;font style=&quot;font-size:17px;&quot; color=&quot;#1f3f6b&quot;&gt;② 风险裕度（时间留出选定 · Q2–Q4 共用）&lt;/font&gt;&lt;/b&gt;&lt;br&gt;L̃ = κL̂（κ = 1.02）；P̃ = max(P̂ − mΔt, 0)（m = 25 kW）&lt;br&gt;方向依据：5× 紧急价 ⇒ 报童临界比 0.8（≈ 残差 q&lt;sub&gt;80&lt;/sub&gt;）&lt;br&gt;&lt;font style=&quot;font-size:13px;&quot; color=&quot;#8a5a2b&quot;&gt;口径：Q1 免裕度（确定性）；Q3/Q4 对组合预报同样折减&lt;/font&gt;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#fcead9;strokeColor=#c08b5c;strokeWidth=1.5;fontSize=15;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="30" y="292" width="600" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="b3_plan" value="&lt;b&gt;&lt;font style=&quot;font-size:17px;&quot; color=&quot;#1f3f6b&quot;&gt;③ 两日滚动计划 LP（每日 0:00 · 288 槽 · 末端自由）&lt;/font&gt;&lt;/b&gt;&lt;br&gt;min Σ&lt;sub&gt;t&lt;/sub&gt; [p&lt;sub&gt;t&lt;/sub&gt;x&lt;sub&gt;t&lt;/sub&gt; + ε(c&lt;sub&gt;t&lt;/sub&gt; + q&lt;sub&gt;t&lt;/sub&gt;)]&lt;br&gt;s.t. x&lt;sub&gt;t&lt;/sub&gt; + q&lt;sub&gt;t&lt;/sub&gt; + P̃&lt;sub&gt;t&lt;/sub&gt; = L̃&lt;sub&gt;t&lt;/sub&gt; + c&lt;sub&gt;t&lt;/sub&gt; + s&lt;sub&gt;t&lt;/sub&gt;，E&lt;sub&gt;t&lt;/sub&gt; = E&lt;sub&gt;t−1&lt;/sub&gt; + ηc&lt;sub&gt;t&lt;/sub&gt; − q&lt;sub&gt;t&lt;/sub&gt;/η&lt;br&gt;0 ≤ c&lt;sub&gt;t&lt;/sub&gt;, q&lt;sub&gt;t&lt;/sub&gt; ≤ 833.3；0 ≤ s&lt;sub&gt;t&lt;/sub&gt; ≤ P̃&lt;sub&gt;t&lt;/sub&gt;；E&lt;sub&gt;t&lt;/sub&gt; ∈ [1200, 10800]；E&lt;sub&gt;0&lt;/sub&gt; = 上一日实际末值&lt;br&gt;&lt;font style=&quot;font-size:13px;&quot; color=&quot;#8a5a2b&quot;&gt;口径：Q1 单日 144 槽、E&lt;sub&gt;0&lt;/sub&gt; = E&lt;sub&gt;144&lt;/sub&gt; = 6000；Q2–Q4 只执行首日，次日滚动重解&lt;/font&gt;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#cfe0f5;strokeColor=#3b547f;strokeWidth=1.5;fontSize=15;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="30" y="412" width="600" height="109" as="geometry" />
+        </mxCell>
+        <mxCell id="b4_adjust" value="&lt;b&gt;&lt;font style=&quot;font-size:17px;&quot; color=&quot;#1f3f6b&quot;&gt;④ 日内调整 LP（Q3/Q4：0/6/12/18 决策）&lt;/font&gt;&lt;/b&gt;&lt;br&gt;min Σ&lt;sub&gt;t&lt;/sub&gt; (1.5p&lt;sub&gt;t&lt;/sub&gt;x&lt;sup&gt;a&lt;/sup&gt;&lt;sub&gt;t&lt;/sub&gt; − p&lt;sub&gt;t&lt;/sub&gt;y&lt;sub&gt;t&lt;/sub&gt;)，y = min(x&lt;sup&gt;0&lt;/sup&gt;&lt;sub&gt;t&lt;/sub&gt;, x&lt;sup&gt;a&lt;/sup&gt;&lt;sub&gt;t&lt;/sub&gt;) ≥ 0&lt;br&gt;等价费用：g = p x&lt;sup&gt;a&lt;/sup&gt; + 0.5p|x&lt;sup&gt;a&lt;/sup&gt; − x&lt;sup&gt;0&lt;/sup&gt;|（调低 50% · 调高 150%）&lt;br&gt;连接条件：E&lt;sup&gt;adj&lt;/sup&gt;&lt;sub&gt;d,144&lt;/sub&gt; = E&lt;sup&gt;plan&lt;/sup&gt;&lt;sub&gt;d,144&lt;/sub&gt;（日末参考，执行不强制到达）&lt;br&gt;&lt;font style=&quot;font-size:13px;&quot; color=&quot;#8a5a2b&quot;&gt;口径：Q1/Q2 无调整层；各决策点用最新预报 + 实际 SOC 重算剩余时段&lt;/font&gt;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#fddecd;strokeColor=#c08b5c;strokeWidth=1.5;fontSize=15;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="30" y="551" width="600" height="109" as="geometry" />
+        </mxCell>
+        <mxCell id="b5_exec" value="&lt;b&gt;&lt;font style=&quot;font-size:17px;&quot; color=&quot;#1f3f6b&quot;&gt;⑤ 逐槽因果执行（free · 每槽只读当前已实现值）&lt;/font&gt;&lt;/b&gt;&lt;br&gt;n&lt;sub&gt;t&lt;/sub&gt; = L&lt;sub&gt;t&lt;/sub&gt; − P&lt;sub&gt;t&lt;/sub&gt; − x&lt;sub&gt;t&lt;/sub&gt;（正为缺口，负为富余）&lt;br&gt;n&lt;sub&gt;t&lt;/sub&gt; ≥ 0：q&lt;sub&gt;t&lt;/sub&gt; = min{n&lt;sub&gt;t&lt;/sub&gt;, 833.3, η(E&lt;sub&gt;t−1&lt;/sub&gt;−1200)}，e&lt;sub&gt;t&lt;/sub&gt; = n&lt;sub&gt;t&lt;/sub&gt; − q&lt;sub&gt;t&lt;/sub&gt;&lt;br&gt;n&lt;sub&gt;t&lt;/sub&gt; &amp;lt; 0：c&lt;sub&gt;t&lt;/sub&gt; = min{−n&lt;sub&gt;t&lt;/sub&gt;, 833.3, (10800−E&lt;sub&gt;t−1&lt;/sub&gt;)/η}，s&lt;sub&gt;t&lt;/sub&gt; = −n&lt;sub&gt;t&lt;/sub&gt; − c&lt;sub&gt;t&lt;/sub&gt;&lt;br&gt;未列变量为 0；SOC 递推同 ③；跨日连续 E&lt;sub&gt;d+1,0&lt;/sub&gt; = E&lt;sup&gt;exec&lt;/sup&gt;&lt;sub&gt;d,T&lt;/sub&gt;&lt;br&gt;&lt;font style=&quot;font-size:13px;&quot; color=&quot;#8a5a2b&quot;&gt;口径：Q2 执行窗 24 h；Q3/Q4 窗 6 h；缺口 5× 紧急、富余弃光（不售电）&lt;/font&gt;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#dbeef4;strokeColor=#4f8f8b;strokeWidth=1.5;fontSize=15;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="30" y="690" width="600" height="128" as="geometry" />
+        </mxCell>
+        <mxCell id="b6_settle" value="&lt;b&gt;&lt;font style=&quot;font-size:17px;&quot; color=&quot;#1f3f6b&quot;&gt;⑥ 费用结算（按实际实现回放）&lt;/font&gt;&lt;/b&gt;&lt;br&gt;C = Σ&lt;sub&gt;t&lt;/sub&gt; [p&lt;sub&gt;t&lt;/sub&gt;x&lt;sup&gt;a&lt;/sup&gt;&lt;sub&gt;t&lt;/sub&gt; + 0.5p&lt;sub&gt;t&lt;/sub&gt;|x&lt;sup&gt;a&lt;/sup&gt;&lt;sub&gt;t&lt;/sub&gt; − x&lt;sup&gt;0&lt;/sup&gt;&lt;sub&gt;t&lt;/sub&gt;|] + 5Σ&lt;sub&gt;t&lt;/sub&gt; p&lt;sub&gt;t&lt;/sub&gt;e&lt;sub&gt;t&lt;/sub&gt;&lt;br&gt;&lt;font style=&quot;font-size:13px;&quot; color=&quot;#8a5a2b&quot;&gt;口径：Q1 仅 Σp x；Q2 为 Σp x&lt;sup&gt;0&lt;/sup&gt; + 5Σp e；Q4 电价取附件 4（G 主口径）&lt;/font&gt;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#e5dfeb;strokeColor=#7f5faf;strokeWidth=1.5;fontSize=15;fontColor=#262626;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="30" y="848" width="600" height="71" as="geometry" />
+        </mxCell>
+        <mxCell id="note" value="注：正式口径 v1.4——EWMA h = 5，κ = 1.02，m = 25 kW，λ = 0.7；正式方案不含场景对冲。&lt;br&gt;计划 LP 的 ε 项仅唯一化充放、不计入报送费用；决策只读历史与已发布预报，未来实际值仅用于回放结算。" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=13;fontColor=#5f6f7f;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;" vertex="1" parent="1">
+          <mxGeometry x="30" y="935" width="640" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;endSize=5;strokeColor=#1f3f6b;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="330" y="105" as="sourcePoint" />
+            <mxPoint x="330" y="133" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;endSize=5;strokeColor=#1f3f6b;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="330" y="263" as="sourcePoint" />
+            <mxPoint x="330" y="291" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;endSize=5;strokeColor=#1f3f6b;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="330" y="383" as="sourcePoint" />
+            <mxPoint x="330" y="411" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;endSize=5;strokeColor=#1f3f6b;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="330" y="522" as="sourcePoint" />
+            <mxPoint x="330" y="550" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;endSize=5;strokeColor=#1f3f6b;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="330" y="661" as="sourcePoint" />
+            <mxPoint x="330" y="689" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;endSize=5;strokeColor=#1f3f6b;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="330" y="819" as="sourcePoint" />
+            <mxPoint x="330" y="847" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_loop" value="跨日滚动" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;endSize=5;strokeColor=#c08b5c;strokeWidth=1.5;dashed=1;dashPattern=6 4;fontSize=13;fontColor=#8a5a2b;labelBackgroundColor=#ffffff;fontFamily=Microsoft YaHei,PingFang SC,Helvetica;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint as="offset" x="0" y="82" />
+            <mxPoint x="631" y="754" as="sourcePoint" />
+            <Array as="points">
+              <mxPoint x="660" y="754" />
+              <mxPoint x="660" y="466" />
+            </Array>
+            <mxPoint x="631" y="466" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
