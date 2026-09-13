@@ -15,6 +15,9 @@
 \newcommand{\questionconclusion}[1]{\par\medskip\noindent\textbf{本问结论：}#1\par\medskip}
 \usepackage{cumcm_official_final}
 \usepackage{longtable}
+% 代码等宽字体：默认 LMMono 缺少 ≤ ≥ ∈ ε η Σ → ∞ κ θ 及组合帽等字形（代码注释用），
+% 改用 DejaVu Sans Mono（覆盖完整）；若目标系统无此字体则回退默认，保证可编译。
+\IfFontExistsTF{DejaVu Sans Mono}{\setmonofont{DejaVu Sans Mono}[Scale=MatchLowercase]}{}
 \graphicspath{{sections/}}
 \hypersetup{pdftitle={微网与外部电网电力调控策略},pdfsubject={因果预测与两日滚动优化},pdfcreator={XeLaTeX}}
 \Urlmuskip=0mu plus 1mu
