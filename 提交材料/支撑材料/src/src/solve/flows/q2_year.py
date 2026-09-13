@@ -17,8 +17,6 @@
 """
 from __future__ import annotations
 
-import time
-
 import numpy as np
 from scipy.sparse import csr_matrix
 
@@ -34,6 +32,8 @@ from solve.common import (
     P_MAX_E,
     REPORT_START,
     T,
+    progress,
+    stage,
 )
 from solve.core.causal import exec_segment_causal
 from solve.core.lp import plan_horizon
@@ -48,7 +48,7 @@ def run_deterministic(data: dict):
     E = E0
     x_plans = np.zeros((N_DAY, T))
     recs = []
-    for d in range(N_DAY):
+    for d in progress(range(N_DAY), desc="Q2 确定性滚动", unit="天"):
         pv_fc = hour_to_slots(fc0[d]) / 6.0          # kW → kWh/时段
         load_kwh = load[d] / 6.0
         # 48 小时滚动：次日无对应 0:00 官方预报，使用典型日作保守占位；
@@ -84,8 +84,9 @@ def run_mc(data, x_plans, e_start_feb, e_targets, n_years=100, seed=42):
     rng = np.random.default_rng(seed)
     emerg_costs = np.zeros(n_years)
     emerg_kwhs = np.zeros(n_years)
-    t0 = time.time()
-    for rep in range(n_years):
+    stage("Q2 蒙特卡洛（固定计划）", f"{n_years} 个模拟年 × {N_DAY - REPORT_START} 天"
+          "（同月整日残差块重采样，离线风险评价）")
+    for rep in progress(range(n_years), desc="Q2 MC 年度重采样", unit="年"):
         E = float(e_start_feb)
         for d in range(REPORT_START, N_DAY):
             pool = np.flatnonzero(months == months[d])
@@ -96,8 +97,6 @@ def run_mc(data, x_plans, e_start_feb, e_targets, n_years=100, seed=42):
             emerg_kwhs[rep] += float(ex["e"].sum())
             emerg_costs[rep] += float(EMERG_MULT * (price @ ex["e"]))
             E = float(ex["E"][-1])
-        if (rep + 1) % 10 == 0:
-            print(f"  MC {rep + 1}/{n_years} 完成，用时 {time.time() - t0:.1f}s")
     return emerg_costs, emerg_kwhs
 
 
@@ -179,8 +178,9 @@ def run_hedge(data: dict, e_starts, e_targets, n_scen: int = 20, seed: int = 7):
     months, residuals = data["months"], data["R0"]
     rng = np.random.default_rng(seed)
     xh = np.zeros((N_DAY, T))
-    t0 = time.time()
-    for d in range(REPORT_START, N_DAY):
+    stage("Q2 两阶段对冲计划（扩展）", f"{N_DAY - REPORT_START} 天 × "
+          f"{n_scen} 情景 LP（无前视残差池，逐日串行）")
+    for d in progress(range(REPORT_START, N_DAY), desc="Q2 对冲计划逐日", unit="天"):
         past = np.arange(max(0, d - 90), d, dtype=int)
         same = past[months[past] == months[d]]
         pool_days = same if len(same) >= 14 else past
@@ -192,6 +192,4 @@ def run_hedge(data: dict, e_starts, e_targets, n_scen: int = 20, seed: int = 7):
             float(e_starts[d]), float(e_targets[d]),
             n_scen=n_scen, rng=rng,
         )
-        if (d - REPORT_START + 1) % 50 == 0:
-            print(f"  hedge {d - REPORT_START + 1}/334，用时 {time.time() - t0:.0f}s")
     return xh

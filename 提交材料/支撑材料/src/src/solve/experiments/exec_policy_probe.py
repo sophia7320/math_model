@@ -28,7 +28,7 @@ import numpy as np
 import program as pm
 from solve import consistency as cs
 from solve import q3_proto as qp
-from solve.common import ROOT
+from solve.common import ROOT, progress, stage
 from solve.io.report import record
 
 SAMPLES = {
@@ -80,14 +80,17 @@ def main() -> None:
     pm.init(seed=42, root=str(ROOT))
     data = qp.load_extended()
     rows = []
-    for name, days in SAMPLES.items():
-        for policy in POLICIES:
-            r = run_sample(data, days, policy)
-            r["样本"] = name
-            rows.append(r)
-            print(f"  [{name}][{policy:>6}] 总 {r['总费用/万元']:6.1f} 万 "
-                  f"（计划 {r['计划购电费/万元']:.1f} + 偏差 {r['偏差费/万元']:.1f} "
-                  f"+ 紧急 {r['紧急购电费/万元']:.1f}）弃电 {r['弃电量/kWh']:.0f} kWh")
+    combos = [(name, days, policy) for name, days in SAMPLES.items()
+              for policy in POLICIES]
+    stage("执行器段末目标对照", f"{len(SAMPLES)} 个样本 × {len(POLICIES)} 种策略"
+          f"（逐日 40 情景对冲仿真，约 {sum(len(d) for _, d in SAMPLES.values())} 天次）")
+    for name, days, policy in progress(combos, desc="执行器策略对照", unit="组合"):
+        r = run_sample(data, days, policy)
+        r["样本"] = name
+        rows.append(r)
+        print(f"  [{name}][{policy:>6}] 总 {r['总费用/万元']:6.1f} 万 "
+              f"（计划 {r['计划购电费/万元']:.1f} + 偏差 {r['偏差费/万元']:.1f} "
+              f"+ 紧急 {r['紧急购电费/万元']:.1f}）弃电 {r['弃电量/kWh']:.0f} kWh")
     df = pd.DataFrame(rows)
     pm.save_outputs(df, "exec_policy_probe")
     record(

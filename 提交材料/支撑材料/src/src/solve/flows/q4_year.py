@@ -26,6 +26,7 @@ from solve.common import (
     N_DAY,
     REPORT_START,
     T,
+    progress,
 )
 from solve.core.causal import exec_segment_causal
 from solve.core.lp import adjust_day, adjust_day_hedge, plan_day, plan_horizon
@@ -51,7 +52,9 @@ def run_year(data, p4, p_typ, vseq, price_mode="H", storage="2day",
     E = E0
     # 按日序号对齐（D < start 的月份仅作预测预热，占位记录不计费）
     recs: list[dict] = [{"D": D} for D in range(N_DAY)]
-    for D in range(start, end):
+    days = range(start, end)
+    desc = f"Q4 年度滚动（{price_mode}·{storage}）"
+    for D in progress(days, desc=desc, unit="天"):
         # 决策价格：G = 当天真实价；H = 三源预测（次日另用 D+1 预测）
         if price_mode == "G":
             p_d = p4[D]
@@ -221,7 +224,8 @@ def run_year_q3(data, p4, p_typ, vseq, price_mode="H", storage="daily",
     E = E0
     # 按日序号对齐（占位记录仅用于索引对齐，不计费）
     recs: list[dict] = [{"D": D} for D in range(N_DAY)]
-    for D in range(REPORT_START, N_DAY):
+    desc = f"Q4 调整层滚动（{price_mode}·{storage}）"
+    for D in progress(range(REPORT_START, N_DAY), desc=desc, unit="天"):
         r = simulate_day_q3(
             data, p4, p_typ, vseq, D, price_mode=price_mode, storage=storage,
             adj_hours=adj_hours, hedge=hedge, n_scen=n_scen, seed=seed,

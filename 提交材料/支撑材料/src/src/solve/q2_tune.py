@@ -23,7 +23,7 @@ import pandas as pd
 import program as pm
 from solve import consistency as cs
 from solve import q2
-from solve.common import E0, RESULTS_DIR, ROOT
+from solve.common import E0, RESULTS_DIR, ROOT, progress, stage
 from solve.q2_adaptive import AdaptiveWeightModel
 from solve.io.report import record
 
@@ -181,7 +181,7 @@ def _task(t):
 
 
 def evaluate(model: AdaptiveWeightModel, configs: list[dict],
-             workers: int | None = None):
+             workers: int | None = None, desc: str = "批量评估配置"):
     """并行评估配置；返回 (汇总表, 日计划费矩阵, 日紧急费矩阵)。"""
     seqs, sid_by_obj = [], {}
     for cfg in configs:
@@ -212,16 +212,19 @@ def evaluate(model: AdaptiveWeightModel, configs: list[dict],
     daily_plan = np.zeros((n, len(REP)))
     daily_emerg = np.zeros((n, len(REP)))
     nw = workers or min(8, os.cpu_count() or 1)
+    stage(desc, f"{n} 个配置 × {len(REP)} 天单日规划+因果执行（{nw} 进程）")
     if nw > 1:
         from multiprocessing import Pool
 
         with Pool(nw, initializer=_init_worker, initargs=(payload,)) as pool:
-            for ci, di, c_plan, c_em in pool.imap_unordered(_task, tasks, chunksize=64):
+            it = progress(pool.imap_unordered(_task, tasks, chunksize=64),
+                          desc=desc, total=len(tasks), unit="任务")
+            for ci, di, c_plan, c_em in it:
                 daily_plan[ci, di] = c_plan
                 daily_emerg[ci, di] = c_em
     else:
         _init_worker(payload)
-        for t in tasks:
+        for t in progress(tasks, desc=desc, unit="任务"):
             ci, di, c_plan, c_em = _task(t)
             daily_plan[ci, di] = c_plan
             daily_emerg[ci, di] = c_em
@@ -236,13 +239,14 @@ def evaluate(model: AdaptiveWeightModel, configs: list[dict],
 
 
 def simulate_two_day(model: AdaptiveWeightModel, seq, kappa: float, margin: float,
-                     detail: bool = False):
+                     detail: bool = False, show_progress: bool = True):
     """2 日滚动正式口径：日末 SOC 自由、跨日连续，规划窗口末端自由（不锚定）。"""
     E = float(E0)
     rows = []
     x_plans = np.zeros((q2.N_DAY, q2.T)) if detail else None
     recs = [None] * q2.N_DAY if detail else None
-    for i, d in enumerate(REP):
+    it = (progress(REP, desc="2 日滚动逐日模拟", unit="天") if show_progress else REP)
+    for i, d in enumerate(it):
         w, u = seq[i]
         l0, p0 = model.forecast_kw(w, u, d)
         # 次日预测在 d 日 0:00 形成：负荷的 d+1−7/d+1−14 已知；
@@ -287,21 +291,21 @@ def rolling_holdout_search() -> pd.DataFrame:
     model = AdaptiveWeightModel().load().build_table()
     split_at = next(i for i, d in enumerate(REP) if model.dates[d] == "2025-07-01")
     rows = []
-    t0 = time.time()
-    for h in (3.0, 5.0, 7.0):
+    combos = [(h, kappa, margin) for h in (3.0, 5.0, 7.0)
+              for kappa in (1.01, 1.015, 1.02) for margin in (25.0, 50.0, 75.0)]
+    stage("2 日滚动时间留出", f"{len(combos)} 个候选 × {len(REP)} 天"
+          "（288 槽两日 LP + 因果执行，逐候选串行；约 3–5 分钟）")
+    for h, kappa, margin in progress(combos, desc="2 日滚动候选", unit="候选"):
         seq = seqs_ewma(model, h)
-        for kappa in (1.01, 1.015, 1.02):
-            for margin in (25.0, 50.0, 75.0):
-                df = simulate_two_day(model, seq, kappa, margin)
-                costs = df["计划购电费/元"].to_numpy() + df["紧急购电费/元"].to_numpy()
-                rows.append({
-                    "配置": f"EWMA h={h:g} κ={kappa:g}+m={margin:g}",
-                    "h": h, "kappa": kappa, "margin": margin,
-                    "开发期(2-6月)/万元": round(float(costs[:split_at].sum()) / 1e4, 1),
-                    "冻结验证期(7-12月)/万元": round(float(costs[split_at:].sum()) / 1e4, 1),
-                    "全年描述值/万元": round(float(costs.sum()) / 1e4, 1),
-                })
-                print(f"  2日滚动候选 {len(rows)}/27（{time.time() - t0:.0f}s）")
+        df = simulate_two_day(model, seq, kappa, margin, show_progress=False)
+        costs = df["计划购电费/元"].to_numpy() + df["紧急购电费/元"].to_numpy()
+        rows.append({
+            "配置": f"EWMA h={h:g} κ={kappa:g}+m={margin:g}",
+            "h": h, "kappa": kappa, "margin": margin,
+            "开发期(2-6月)/万元": round(float(costs[:split_at].sum()) / 1e4, 1),
+            "冻结验证期(7-12月)/万元": round(float(costs[split_at:].sum()) / 1e4, 1),
+            "全年描述值/万元": round(float(costs.sum()) / 1e4, 1),
+        })
     out = pd.DataFrame(rows).sort_values(
         ["开发期(2-6月)/万元", "冻结验证期(7-12月)/万元"]
     ).reset_index(drop=True)
@@ -335,7 +339,7 @@ def main():
             for W in W_LIST]
     cfgs += [{"名称": ("历史均值" if hl > 1e8 else f"EWMA h={hl}"),
               "seq": seqs_ewma(model, hl), "margin": None} for hl in HL_LIST]
-    df1, dp1, de1 = evaluate(model, cfgs)
+    df1, dp1, de1 = evaluate(model, cfgs, desc="阶段1 窗口与 EWMA")
     df1.to_csv(pm.outputs_dir() / "q2e_tune_window.csv", index=False, encoding="utf-8-sig")
 
     grid_rows = df1[df1["配置"].str.startswith("网格")]
@@ -387,7 +391,7 @@ def main():
             cfgs2.append({"名称": f"W7 仿射裕度 a={a}, b={b}", "seq": seq_w7,
                           "margin": {"kind": "pv_affine", "a": a, "b": b,
                                      "m": refs["W7"]["hour"]}})
-    df2, dp2, de2 = evaluate(model, cfgs2)
+    df2, dp2, de2 = evaluate(model, cfgs2, desc="阶段2 决策裕度（分布参考值）")
     df2.to_csv(pm.outputs_dir() / "q2e_tune_margin.csv", index=False, encoding="utf-8-sig")
     top2 = df2.loc[df2["总费用/万元"].idxmin()]
     print(f"阶段2 最优：{top2['配置']} = {top2['总费用/万元']} 万元")
@@ -402,7 +406,7 @@ def main():
         for alpha in (0.05, 0.1, 0.2, 0.35):
             cfgs3.append({"名称": f"{bname} 收缩 α={alpha}",
                           "seq": shrink_seq(seq, alpha), "margin": None})
-    df3, dp3, de3 = evaluate(model, cfgs3)
+    df3, dp3, de3 = evaluate(model, cfgs3, desc="阶段3 风险目标与收缩")
     df3.to_csv(pm.outputs_dir() / "q2e_tune_risk.csv", index=False, encoding="utf-8-sig")
     top3 = df3.loc[df3["总费用/万元"].idxmin()]
     print(f"阶段3 最优：{top3['配置']} = {top3['总费用/万元']} 万元")
@@ -432,7 +436,7 @@ def main():
             for m in (25.0, 50.0, 75.0):
                 cfgs4.append({"名称": f"{seq_ew_name} κ={k}+m={m:.0f}", "seq": seq,
                               "margin": {"kind": "combo", "k": k, "m": m}})
-    df4, dp4, de4 = evaluate(model, cfgs4)
+    df4, dp4, de4 = evaluate(model, cfgs4, desc="阶段4 精扫 κ/组合/动态κ")
     df4.to_csv(pm.outputs_dir() / "q2e_tune_combo.csv", index=False, encoding="utf-8-sig")
     top4 = df4.loc[df4["总费用/万元"].idxmin()]
     print(f"阶段4 最优：{top4['配置']} = {top4['总费用/万元']} 万元")
@@ -636,7 +640,9 @@ def joint_residual_mc(model, seq, kappa, margin, x_plans, e_start,
     rng = np.random.default_rng(seed)
     emerg = np.zeros(n_years)
     kwh = np.zeros(n_years)
-    for y in range(n_years):
+    stage("联合残差蒙特卡洛", f"{n_years} 个模拟年 × {len(REP)} 天"
+          "（同月整日残差块重采样 + 逐日因果回放）")
+    for y in progress(range(n_years), desc="联合残差 MC", unit="年"):
         E = float(e_start)
         for d in REP:
             pool = cs.scenario_indices(months, d)
@@ -648,8 +654,6 @@ def joint_residual_mc(model, seq, kappa, margin, x_plans, e_start,
             kwh[y] += float(ex["e"].sum())
             emerg[y] += float(q2.EMERG_MULT * (model.price @ ex["e"]))
             E = float(ex["E"][-1])
-        if (y + 1) % 20 == 0:
-            print(f"  MC(联合残差) {y + 1}/{n_years}")
     return emerg, kwh
 
 
@@ -668,6 +672,8 @@ def write_result2_tuned(W: float = 5.0, kappa: float = 1.02,
     model = AdaptiveWeightModel().load().build_table()
     seq = seqs_ewma(model, W)
 
+    stage("生成官方 result2", f"2 日滚动 {len(REP)} 天"
+          f"（EWMA h={W:g} + κ={kappa:g} + m={margin:g}）→ 回读校验 → 图与年度 MC")
     df, x_plans, recs = simulate_two_day(model, seq, kappa, margin, detail=True)
     plan = float(df["计划购电费/元"].sum())
     emerg = float(df["紧急购电费/元"].sum())

@@ -19,7 +19,7 @@ import pandas as pd
 import program as pm
 from solve import q2
 from solve import q3_proto as qp
-from solve.common import ROOT
+from solve.common import ROOT, progress, stage
 from solve.io.report import record
 
 # 统一口径：`qp.load_extended()` 已生成 EWMA h=5 权重（data["EWMA_WU"]），
@@ -91,15 +91,17 @@ def main():
     nw = min(8, os.cpu_count() or 1)
     from multiprocessing import Pool
 
+    stage("对冲扩展灵敏度", f"{n} 个变体 × {len(DAYS)} 天"
+          f"（情景数/池窗口/λ，变体间 {nw} 进程并行；约 5–10 分钟）")
     with Pool(nw, initializer=_init, initargs=(data,)) as pool:
-        for vi, c_plan, c_adj, c_em, e_kwh, n_viol in pool.imap_unordered(
-                _task, tasks, chunksize=1):
+        it = progress(pool.imap_unordered(_task, tasks, chunksize=1),
+                      desc="对冲扩展灵敏度变体", total=n, unit="变体")
+        for vi, c_plan, c_adj, c_em, e_kwh, n_viol in it:
             plan[vi] += c_plan
             adj[vi] += c_adj
             em[vi] += c_em
             em_kwh[vi] += e_kwh
             viol[vi] += n_viol
-            print(f"  变体 {vi + 1}/{n} 完成，用时 {time.time() - t0:.0f}s")
 
     out = pd.DataFrame({
         "配置": [name for name, _ in VARIANTS],

@@ -42,6 +42,7 @@
 - `codegraph` CLI 可查符号调用/影响（本地索引在 `.codegraph/`，已 gitignore）：改码后 `codegraph sync`，用 `callers/impact` 排查；属性调用（`cs.xxx`/`qp.xxx`）漏解析，须 grep 兜底复核。
 - **重跑防重复**：`q3.py`、`q4.py`、`q3_ablation.py`、`q2_adaptive.py`、`q2_tune.py`、`q3_tune.py`、`q3_sensitivity.py`、`solve/experiments/q2_arima.py`、`solve/experiments/exec_policy_probe.py` 自带 `record()`（先删同名旧章节再追加）；其余脚本用追加模式的 `pm.record_result`，重跑前手动清理。
 - **多进程**：`solve/` 里用 `multiprocessing.Pool`（Windows 为 spawn）时，入口必须由 `if __name__ == "__main__":` 保护，否则子进程会递归导入主模块。
+- **长任务进度条（2026-09-13 新增）**：长脚本（`q2_tune`、`q3`/`q3_tune`/`q3_sensitivity`、`q4_price_fit`、`models/adaptive.py` 成本表、`experiments/q2_arima`、`flows/q2_year`/`q4_year` 年度循环、`exec_policy_probe`）统一用 `solve/common.py::progress()`（tqdm 进度条，输出到 stderr）与 `stage()`（【阶段】+ 预计耗时说明）；**Pool 进度必须用 `imap_unordered`**（`map` 是急切的，进度条不会实时刷新）；无 tqdm 时自动退化、不影响数值结果，回归测试见 `tests/`。
 - `pm.optimize.solve_lp` 只返回解与目标值，**不含对偶价格**；需要 LP 对偶/灵敏度时直接调 `scipy.optimize.linprog(method="highs")` 取 `eqlin.marginals`。
 
 ## 工作流（skill 流水线，按序调用）

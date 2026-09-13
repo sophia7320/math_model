@@ -38,7 +38,7 @@ import program as pm
 from solve import consistency as cs
 from solve import q2
 from solve import q3_proto as qp
-from solve.common import ROOT, T
+from solve.common import ROOT, T, progress, stage
 from solve.io.excel import verify_result3, write_result3
 from solve.io.report import record
 
@@ -72,9 +72,9 @@ def run_main(data):
     out = {k: np.zeros((N_Q3, T)) for k in ("xp", "xa", "c", "d", "E", "e")}
     out["E_start"] = np.zeros(N_Q3)
     rows = []
-    t0 = time.time()
     E = float(qp.E0)
-    for i, D in enumerate(days):
+    stage("Q3 主方案年度模拟", f"{N_Q3} 天 ×（288 槽两日计划 + 0/6/12/18 调整 + 因果执行）；约 30–40 s")
+    for i, D in enumerate(progress(days, desc="Q3 主方案逐日", unit="天")):
         r = _day_result(data, D, E)
         out["xp"][i] = r["x_plan"]; out["xa"][i] = r["x_final"]
         out["c"][i] = r["c"]; out["d"][i] = r["d"]
@@ -87,8 +87,6 @@ def run_main(data):
                      "场景最大日序号": int(r.get("scenario_max_day", -1)),
                      "场景数": int(r.get("scenario_count", 0))})
         E = float(r["E_end"])
-        if (i + 1) % 50 == 0:
-            print(f"  主方案 {i + 1}/{N_Q3} 天，用时 {time.time() - t0:.0f}s")
     return {k: v for k, v in out.items()}, pd.DataFrame(rows)
 
 
@@ -98,7 +96,7 @@ def run_baseline(data, tag, **kw):
     xa = np.zeros((N_Q3, T)); e = np.zeros((N_Q3, T))
     tot = plan = adj = em = 0.0
     E = float(qp.E0)
-    for i, D in enumerate(days):
+    for i, D in enumerate(progress(days, desc=f"Q3 基线：{tag}", unit="天")):
         r = qp.simulate_day_rt(data, D, 1.0, e_start=E, **kw)
         xa[i] = r["x_final"]; e[i] = r["e"]
         tot += r["total"]; plan += r["plan_cost"]; adj += r["adjust_net"]; em += r["emerg"]
@@ -142,10 +140,9 @@ def main():
     log = pm.get_logger("q3")
     t0 = time.time()
     data = qp.load_extended()  # 含 EWMA h=5 统一权重（consistency.py）
-    print("基线对照……")
+    stage("基线对照", "无调整（官方）+ 三点调整（官方），各 334 天（已发布预报口径）")
     base_noadj = run_baseline(data, "无调整（官方）", adj_hours=())
     base_off = run_baseline(data, "三点调整（官方）")
-    print("主方案……")
     out, daily = run_main(data)
     cost = {"plan": float(sum(daily["计划费/元"])), "adj": float(sum(daily["调整净额/元"])),
             "emerg": float(sum(daily["紧急费/元"])), "total": float(sum(daily["总费用/元"]))}

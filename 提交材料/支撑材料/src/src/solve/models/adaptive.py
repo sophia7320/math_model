@@ -43,6 +43,8 @@ from solve.common import (
     RESULTS_DIR,
     ROOT,
     T,
+    progress,
+    stage,
 )
 from solve.core.causal import (
     CAUSAL_POLICY_VERSION,
@@ -383,13 +385,17 @@ class AdaptiveWeightModel:
 
         days = list(range(self.START, N_DAY))
         t0 = time.time()
+        stage("构建 Q2E 成本表",
+              f"{len(days)} 天 × {len(self.grid) ** 2} 权重网格 + 1 步 Adam 精化"
+              f"（workers={self.workers}；约 5–6 分钟，缓存命中则秒回）")
         if self.workers > 1:
             from multiprocessing import Pool
 
             with Pool(self.workers, initializer=_init_worker, initargs=(self,)) as pool:
-                results = pool.map(_worker_day, days)
+                results = list(progress(pool.imap_unordered(_worker_day, days),
+                                        desc="Q2E 成本表（多进程）", total=len(days), unit="天"))
         else:
-            results = [self._one_day(d) for d in days]
+            results = [self._one_day(d) for d in progress(days, desc="Q2E 成本表", unit="天")]
 
         n = len(self.grid)
         self.C = np.zeros((N_DAY, n, n))

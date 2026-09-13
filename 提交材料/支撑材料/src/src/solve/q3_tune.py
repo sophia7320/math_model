@@ -26,7 +26,7 @@ import pandas as pd
 import program as pm
 from solve import consistency as cs
 from solve import q3_proto as qp
-from solve.common import ROOT
+from solve.common import ROOT, progress, stage
 from solve.io.report import record
 
 REP = list(range(cs.START_DAY, 365))
@@ -49,7 +49,6 @@ def _task(cfg) -> dict:
     lam, kappa, margin = cfg
     p = _P
     data = p["data"]
-    t0 = time.time()
     E = float(qp.E0)
     costs = np.zeros(len(REP))
     for i, D in enumerate(REP):
@@ -61,8 +60,6 @@ def _task(cfg) -> dict:
     split = p["split"]
     dev = float(costs[:split].sum()) / 1e4
     val = float(costs[split:].sum()) / 1e4
-    print(f"  λ={lam:g} κ={kappa:g} m={margin:g}: 开发 {dev:.1f} 万 / "
-          f"冻结 {val:.1f} 万（{time.time() - t0:.0f}s）")
     return {"配置": f"λ={lam:g} κ={kappa:g} m={margin:g}", "lam": lam,
             "kappa": kappa, "margin": margin,
             "开发期(2-6月)/万元": round(dev, 1),
@@ -70,9 +67,10 @@ def _task(cfg) -> dict:
             "全年描述值/万元": round(dev + val, 1)}
 
 
-def _run(payload, cfgs, workers=WORKERS) -> pd.DataFrame:
+def _run(payload, cfgs, workers=WORKERS, desc="参数搜索") -> pd.DataFrame:
     with Pool(workers, initializer=_init_worker, initargs=(payload,)) as pool:
-        rows = pool.map(_task, cfgs)
+        rows = list(progress(pool.imap_unordered(_task, cfgs, chunksize=1),
+                             desc=desc, total=len(cfgs), unit="配置"))
     return pd.DataFrame(rows)
 
 
@@ -88,26 +86,32 @@ def main() -> None:
 
     # ---------- A. 粗筛 κ × m（λ 固定） ----------
     cfgs = [(LAM_FIX, k, m) for k in KAPPA_GRID for m in MARGIN_GRID]
-    coarse = _run(payload, cfgs)
+    stage("粗筛 κ×m", f"λ={LAM_FIX:g} 固定，{len(cfgs)} 组 × {len(REP)} 天 × "
+          f"{cs.N_SCEN} 情景对冲（{WORKERS} 进程并行；约 10–12 分钟）")
+    coarse = _run(payload, cfgs, desc="粗筛 κ×m")
     coarse = coarse.sort_values(
         ["开发期(2-6月)/万元", "冻结验证期(7-12月)/万元"]).reset_index(drop=True)
     coarse["开发期选中"] = coarse.index == 0
     coarse["验证期排名"] = coarse["冻结验证期(7-12月)/万元"].rank(method="min").astype(int)
     coarse.to_csv(pm.outputs_dir() / "q3e_tune_unified_coarse.csv",
                   index=False, encoding="utf-8-sig")
+    print(coarse.to_string(index=False))
     best = coarse.iloc[0]
     print(f"粗筛选中：{best['配置']}（开发 {best['开发期(2-6月)/万元']} 万，"
           f"冻结 {best['冻结验证期(7-12月)/万元']} 万，验证排名 {best['验证期排名']}）")
 
     # ---------- B. 细选 λ ----------
     cfgs2 = [(lam, float(best["kappa"]), float(best["margin"])) for lam in LAM_GRID]
-    fine = _run(payload, cfgs2, workers=min(WORKERS, len(cfgs2)))
+    stage("细选 λ", f"在粗筛最优 (κ,m)=({best['kappa']:g},{best['margin']:g}) 上扫 "
+          f"{len(cfgs2)} 组 λ × {len(REP)} 天（约 3 分钟）")
+    fine = _run(payload, cfgs2, workers=min(WORKERS, len(cfgs2)), desc="细选 λ")
     fine = fine.sort_values(
         ["开发期(2-6月)/万元", "冻结验证期(7-12月)/万元"]).reset_index(drop=True)
     fine["开发期选中"] = fine.index == 0
     fine["验证期排名"] = fine["冻结验证期(7-12月)/万元"].rank(method="min").astype(int)
     fine.to_csv(pm.outputs_dir() / "q3e_tune_unified_fine.csv",
                 index=False, encoding="utf-8-sig")
+    print(fine.to_string(index=False))
     best2 = fine.iloc[0]
     print(f"细选选中：{best2['配置']}（开发 {best2['开发期(2-6月)/万元']} 万，"
           f"冻结 {best2['冻结验证期(7-12月)/万元']} 万，验证排名 {best2['验证期排名']}）")

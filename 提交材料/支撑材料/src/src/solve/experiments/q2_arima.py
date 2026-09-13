@@ -30,7 +30,7 @@ from statsmodels.tsa.arima.model import ARIMA
 
 import program as pm
 from solve import q2
-from solve.common import DATA_C, E0, ROOT
+from solve.common import DATA_C, E0, ROOT, progress, stage
 from solve.io.report import record
 from solve.models.adaptive import AdaptiveWeightModel
 
@@ -121,15 +121,18 @@ class ArimaForecaster:
         tasks = [(which, slot, self.order, self.refit_every)
                  for which in (0, 1) for slot in range(144)]
         t0 = time.time()
+        stage("ARIMA 滚动预测", f"ARIMA{self.order} 每天重估，"
+              f"288 个 (序列, 槽位) 拟合任务（{self.workers} 进程；首次约 5 分钟）")
         if self.workers > 1:
             from multiprocessing import Pool
 
             with Pool(self.workers, initializer=_init_worker,
                       initargs=(self.data,)) as pool:
-                results = pool.map(_fit_slot, tasks)
+                results = list(progress(pool.imap_unordered(_fit_slot, tasks, chunksize=1),
+                                        desc="ARIMA 槽位拟合", total=len(tasks), unit="任务"))
         else:
             _init_worker(self.data)
-            results = [_fit_slot(tk) for tk in tasks]
+            results = [_fit_slot(tk) for tk in progress(tasks, desc="ARIMA 槽位拟合", unit="任务")]
 
         fl = np.zeros((N_DAY, 144))
         fp = np.zeros((N_DAY, 144))
@@ -150,11 +153,12 @@ def mae_rmse(pred_kw: np.ndarray, true_kw: np.ndarray):
     return float(np.abs(err).mean()), float(np.sqrt((err ** 2).mean()))
 
 
-def annual_cost(load_fc_kwh: np.ndarray, pv_fc_kwh: np.ndarray, data: dict):
+def annual_cost(load_fc_kwh: np.ndarray, pv_fc_kwh: np.ndarray, data: dict,
+                desc: str = "年度费用回放"):
     """用给定预测跑全年计划 + 执行 + 紧急购电，返回 (计划费, 紧急费, 总费用)。"""
     price, load, pv = data["price"], data["load"], data["pv_act"]
     plan = emerg = 0.0
-    for d in range(REPORT_START, N_DAY):
+    for d in progress(range(REPORT_START, N_DAY), desc=desc, unit="天"):
         x, _E, _ = q2.plan_day(price, load_fc_kwh[d], pv_fc_kwh[d], E0, eps=EPS_PLAN)
         ex = q2.exec_day_causal(price, load[d] / 6.0, pv[d] / 6.0, x, E0)
         plan += float(price @ x)
@@ -243,7 +247,8 @@ def run_comparison(workers=WORKERS) -> dict:
         ("ARIMA(2,0,1)", ar.load_fc, ar.pv_fc),
         ("典型日（B）", fl_typ, fp_typ),
     ):
-        plan, emerg, tot = annual_cost(fl / 6.0, fp / 6.0, data)
+        plan, emerg, tot = annual_cost(fl / 6.0, fp / 6.0, data,
+                                       desc=f"费用回放：{name}")
         cost_rows.append({
             "预测模型": name,
             "计划购电费/万元": round(plan / 1e4, 1),

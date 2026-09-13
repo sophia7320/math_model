@@ -22,7 +22,7 @@ import pandas as pd
 import program as pm
 from solve import consistency as cs
 from solve import q2
-from solve.common import DATA_C, E0, ROOT, T
+from solve.common import DATA_C, E0, ROOT, T, progress, stage
 from solve.data.attachments import load_extended
 from solve.models.adaptive import hist_forecast_asof, hist_load_forecast_asof
 from solve.models.price import (  # 唯一实现（models/price.py），此处再导出
@@ -68,9 +68,11 @@ def main():
 
     # ---- 2) 费用：一次遍历（事后最优 + 滚动标定共用）----
     print("\n费用网格（一次遍历，66 组）……")
+    stage("电价费用网格", f"{N_DAY} 天 × {len(grid)} 组权重"
+          "（两日滚动 LP + 逐槽因果执行；约 7 分钟，npz 由本步骤刷新）")
     daily_costs = np.zeros((N_DAY, len(grid)))
     E_state = np.full(len(grid), float(E0))
-    for D in range(N_DAY):
+    for D in progress(range(N_DAY), desc="电价费用网格（逐日）", unit="天"):
         for j, v in enumerate(grid):
             p_hat = forecast_price(D, v, p4, p_typ) if D >= 7 else p4[D]
             p_hat1 = forecast_price_next_asof(D, v, p4, p_typ)
@@ -88,8 +90,6 @@ def main():
             )
             E_state[j] = float(ex["E"][-1])
             daily_costs[D, j] = float(p4[D] @ x + q2.EMERG_MULT * (p4[D] @ ex["e"]))
-        if (D + 1) % 60 == 0:
-            print(f"  {D + 1}/{N_DAY} 天 （{time.time() - t0:.0f}s）")
 
     idx = {(round(v[0], 4), round(v[1], 4), round(v[2], 4)): j for j, v in enumerate(grid)}
     after_tot = daily_costs[days].sum(axis=0)
