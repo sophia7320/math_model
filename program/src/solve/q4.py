@@ -23,6 +23,7 @@ import pandas as pd
 from scipy.sparse import csr_matrix, lil_matrix
 
 import program as pm
+from solve import consistency as cs
 from solve import q2
 from solve import q3_proto as qp
 from solve.common import DATA_C, RESULTS_DIR, ROOT, E0, E_MAX, E_MIN, ETA, P_MAX_E, T
@@ -39,9 +40,8 @@ EPS_PLAN = 1e-3
 # 数据与电价预测
 # ---------------------------------------------------------------------------
 def load_q4_data() -> tuple[dict, np.ndarray, np.ndarray]:
-    """附件 1/2/3 + 附件 4 电价 + 平滑历史权重。"""
+    """附件 1/2/3 + 附件 4 电价 + 统一 EWMA h=5 权重（consistency.py）。"""
     data = qp.load_extended()
-    data["U_SMOOTH"] = qp.make_smooth_u(data, BETA)
     df4 = pm.read_table(DATA_C / "附件4.xlsx")
     p4 = df4.iloc[:, 1:145].to_numpy(float)
     return data, p4, data["price"]
@@ -80,16 +80,21 @@ def price_forecast_next(D: int, v: np.ndarray, p4: np.ndarray, p_typ: np.ndarray
 # ---------------------------------------------------------------------------
 # LP：2 日滚动计划（跨日连续，末端回到 e_terminal）
 # ---------------------------------------------------------------------------
-def plan_horizon(price_h, load_h, pv_h, e_start, e_terminal, eps=EPS_PLAN):
-    """多日计划 LP：min Σp·x + eps·Σ(c+d)；储能跨日连续 E(0)=e_start、E(H)=e_terminal。"""
+def plan_horizon(price_h, load_h, pv_h, e_start, e_terminal=None, eps=EPS_PLAN):
+    """多日计划 LP：min Σp·x + eps·Σ(c+d)；储能跨日连续 E(0)=e_start。
+
+    ``e_terminal=None``（默认）时规划窗口末端完全自由（不锚定终值）；
+    传入数值时锚定 E(H)=e_terminal（供结构对照）。
+    """
     H = len(price_h)
     n = 5 * H
     c_obj = np.zeros(n)
     c_obj[0:H] = price_h
     c_obj[H:3 * H] = eps
 
-    A_eq = lil_matrix((2 * H + 1, n))
-    b_eq = np.zeros(2 * H + 1)
+    n_rows = 2 * H + (1 if e_terminal is not None else 0)
+    A_eq = lil_matrix((n_rows, n))
+    b_eq = np.zeros(n_rows)
     for t in range(H):
         A_eq[t, 0 * H + t] = 1.0
         A_eq[t, 1 * H + t] = -1.0
@@ -104,8 +109,9 @@ def plan_horizon(price_h, load_h, pv_h, e_start, e_terminal, eps=EPS_PLAN):
         A_eq[r, 1 * H + t] = -ETA
         A_eq[r, 2 * H + t] = 1.0 / ETA
         b_eq[r] = e_start if t == 0 else 0.0
-    A_eq[2 * H, 4 * H + H - 1] = 1.0
-    b_eq[2 * H] = e_terminal
+    if e_terminal is not None:
+        A_eq[2 * H, 4 * H + H - 1] = 1.0
+        b_eq[2 * H] = float(e_terminal)
 
     bounds = (
         [(0.0, None)] * H
@@ -124,11 +130,15 @@ def plan_horizon(price_h, load_h, pv_h, e_start, e_terminal, eps=EPS_PLAN):
 # 全年模拟
 # ---------------------------------------------------------------------------
 def run_year(data, p4, p_typ, vseq, price_mode="H", storage="2day",
-             start=0, end=N_DAY) -> list[dict]:
-    """全年滚动模拟；返回逐日记录（含 x/c/d/s/e/E 与费用，REPORT_START 起计费）。"""
-    load, pv_act, fc0 = data["load"], data["pv_act"], data["fc0"]
+             start=REPORT_START, end=N_DAY) -> list[dict]:
+    """全年滚动模拟（统一口径：EWMA 预测 + κ/m；2-1 起 E0 起步）。
+
+    返回逐日记录（含 x/c/d/s/e/E 与费用，REPORT_START 起计费）。
+    """
+    load, pv_act = data["load"], data["pv_act"]
     E = E0
-    recs: list[dict] = []
+    # 按日序号对齐（D < start 的月份仅作预测预热，占位记录不计费）
+    recs: list[dict] = [{"D": D} for D in range(N_DAY)]
     for D in range(start, end):
         if price_mode == "G":
             p_d = p4[D]
@@ -137,34 +147,33 @@ def run_year(data, p4, p_typ, vseq, price_mode="H", storage="2day",
             v = vseq[D]
             p_d = price_forecast_d(D, v, p4, p_typ)
             p_d1 = price_forecast_next(D, v, p4, p_typ) if D + 1 < N_DAY else p_d
-        load_d = load[D] / 6.0
-        load_fc_d = qp.hist_load_forecast_asof(data, D, D) / 6.0
-        pv_fc_d = q2._hour_to_slots(fc0[D]) / 6.0
+        load_act = load[D] / 6.0
+        load_fc_d = cs.kappa_load(qp.hist_load_forecast_asof(data, D, D)) / 6.0
+        pv_fc_d = cs.margin_pv(qp.hist_forecast_asof(data, D, D)) / 6.0
 
         if storage == "daily":
-            x_day, E_plan, _ = q2.plan_day(p_d, load_fc_d, pv_fc_d, E, eps=EPS_PLAN)
-            e_end = float(np.clip(E_plan[-1], E_MIN, E_MAX))
+            x_day, _E_plan, _ = q2.plan_day(p_d, load_fc_d, pv_fc_d, E, eps=EPS_PLAN)
         else:
             D1 = min(D + 1, N_DAY - 1)
-            load_d1 = qp.hist_load_forecast_asof(data, D + 1, D) / 6.0
-            pv_fc_d1 = qp.hist_forecast_asof(data, D + 1, D) / 6.0
-            xh, Eh = plan_horizon(
+            load_fc_d1 = cs.kappa_load(qp.hist_load_forecast_asof(data, D + 1, D)) / 6.0
+            pv_fc_d1 = cs.margin_pv(qp.hist_forecast_asof(data, D + 1, D)) / 6.0
+            xh, _Eh = plan_horizon(
                 np.concatenate([p_d, p_d1]),
-                np.concatenate([load_fc_d, load_d1]),
+                np.concatenate([load_fc_d, load_fc_d1]),
                 np.concatenate([pv_fc_d, pv_fc_d1]),
-                E, E0,
+                E, None,
             )
             x_day = xh[:T]
-            e_end = float(np.clip(Eh[T - 1], E_MIN, E_MAX))
 
-        ex = q2.exec_segment_causal(load_d, pv_act[D] / 6.0, x_day, E, e_end)
+        # 统一执行策略（free）：无段末硬目标
+        ex = q2.exec_segment_causal(load_act, pv_act[D] / 6.0, x_day, E, None)
         rec = {"D": D, "x": x_day, "c": ex["c"], "d": ex["d"], "s": ex["s"],
                "e": ex["e"], "E": ex["E"], "E_start": float(E)}
         if D >= REPORT_START:
             rec["plan_cost"] = float(p4[D] @ x_day)
             rec["emerg"] = float(q2.EMERG_MULT * (p4[D] @ ex["e"]))
             rec["total"] = rec["plan_cost"] + rec["emerg"]
-        recs.append(rec)
+        recs[D] = rec
         E = float(ex["E"][-1])
     return recs
 
@@ -384,39 +393,35 @@ def run_result42() -> None:
 # Q3 层：0:00 计划 + 6/12/18 调整（+6/12 对冲），结算用附件 4 真实价
 # ---------------------------------------------------------------------------
 def simulate_day_q3(data, p4, p_typ, vseq, D, price_mode="H", storage="daily",
-                    adj_hours=(6, 12, 18), hedge=True, n_scen=40, seed=7,
-                    lam=0.7, adj_lam=0.7, e_start=E0, eps=qp.EPS_TH) -> dict:
-    """Q4 Q3 层单日模拟。
+                    adj_hours=(6, 12, 18), hedge=True, n_scen=cs.N_SCEN, seed=7,
+                    lam=0.7, adj_lam=0.7, kappa=cs.KAPPA, margin=cs.MARGIN,
+                    e_start=E0, eps=qp.EPS_TH) -> dict:
+    """Q4 Q3 层单日模拟（统一口径：EWMA 预测 + κ/m + （Δ负荷, Δ光伏）联合残差场景）。
 
     H 口径：决策价格 = 三源预测（滚动 v）；G：决策价格 = 当天真实价。
     storage='daily'：日循环（计划/调整末端回 E0）；'2day'：2 日滚动、跨日连续。
     结算一律用附件 4 真实价：买入 + 偏差费（0.5p|x−x⁰|）+ 5 倍紧急。
     """
     p_dec = p4[D] if price_mode == "G" else price_forecast_d(D, vseq[D], p4, p_typ)
-    load_kwh = data["load"][D] / 6.0
-    load_fc_kwh = qp.hist_load_forecast_asof(data, D, D) / 6.0
+    load_act_kwh = data["load"][D] / 6.0
+    load_nom = cs.kappa_load(qp.hist_load_forecast_asof(data, D, D), kappa) / 6.0
     pv_act_kwh = data["pv_act"][D] / 6.0
     f0 = q2._hour_to_slots(data["fc0"][D])
     ph = qp.hist_forecast(data, D)
-    pv_plan = (lam * f0 + (1.0 - lam) * ph) / 6.0
+    pv_plan = cs.margin_pv(np.clip(lam * f0 + (1.0 - lam) * ph, 0.0, None),
+                           margin) / 6.0
 
     if storage == "daily":
-        x_plan, E_plan, _ = q2.plan_day(
-            p_dec, load_fc_kwh, pv_plan, e_start, eps=eps
-        )
+        x_plan, E_plan, _ = q2.plan_day(p_dec, load_nom, pv_plan, e_start, eps=eps)
         e_day_end = E0
     else:
         D1 = min(D + 1, N_DAY - 1)
         p_dec1 = (p4[D1] if price_mode == "G"
                   else price_forecast_next(D, vseq[D], p4, p_typ))
-        xh, Eh = plan_horizon(
-            np.concatenate([p_dec, p_dec1]),
-            np.concatenate([load_fc_kwh, qp.hist_load_forecast_asof(data, D + 1, D) / 6.0]),
-            np.concatenate([pv_plan, qp.hist_forecast_asof(data, D + 1, D) / 6.0]),
-            e_start, E0,
-        )
-        x_plan, E_plan = xh[:T], Eh[:T]
-        e_day_end = float(Eh[T - 1])
+        x_plan, E_plan, _ = qp.plan_two_day(
+            data, D, lam, e_start, kappa=kappa, margin=margin,
+            price2=np.concatenate([p_dec, p_dec1]))
+        e_day_end = float(E_plan[-1])
 
     x_seq = x_plan.copy()
     E_target = E_plan.copy()
@@ -430,9 +435,9 @@ def simulate_day_q3(data, p4, p_typ, vseq, D, price_mode="H", storage="daily",
     t = 0
     for pub in (6, 12, 18):
         t1 = pub * 6
+        # 统一执行策略（free）：无段末硬目标
         seg = q2.exec_segment_causal(
-            load_kwh[t:t1], pv_act_kwh[t:t1], x_seq[t:t1],
-            E_now, float(np.clip(E_target[t1 - 1], E_MIN, E_MAX)),
+            load_act_kwh[t:t1], pv_act_kwh[t:t1], x_seq[t:t1], E_now, None,
         )
         e_total[t:t1] = seg["e"]
         c_all[t:t1] = seg["c"]
@@ -443,34 +448,29 @@ def simulate_day_q3(data, p4, p_typ, vseq, D, price_mode="H", storage="daily",
         if pub in adj_hours:
             off = qp.fc_slots(data[f"fc{pub}"][D], pub)
             src = off if adj_lam is None else adj_lam * off + (1.0 - adj_lam) * ph
-            pv_new = np.clip(src, 0.0, None) / 6.0
+            pv_new = cs.margin_pv(np.clip(src, 0.0, None), margin) / 6.0
             if pub in (6, 12) and hedge and D > 14:
                 pool = qp.causal_residual_pool(data, D)
                 rng = np.random.default_rng(np.random.SeedSequence([seed, D, pub]))
-                idxs = rng.choice(pool, size=max(0, n_scen - 1), replace=True)
-                scenario_days.extend(int(ix) for ix in idxs)
-                scens = [pv_new[t1:]] + [
-                    np.clip(
-                        pv_new[t1:] - qp.forecast_residual(
-                            data, int(ix), pub, adj_lam
-                        )[t1:],
-                        0.0, None,
-                    )
-                    for ix in idxs
-                ]
+                sel = rng.choice(len(pool), size=max(0, n_scen - 1), replace=True)
+                scenario_days.extend(int(pool[k]) for k in sel)
+                RL, RP = qp.joint_residual_blocks(data, pool, pub, adj_lam, kappa, margin)
+                load_scens = [load_nom[t1:]] + [
+                    np.clip(load_nom[t1:] + RL[k][t1:], 0.0, None) for k in sel]
+                pv_scens = [pv_new[t1:]] + [
+                    np.clip(pv_new[t1:] + RP[k][t1:], 0.0, None) for k in sel]
                 x_adj, E_adj = qp.adjust_day_hedge(
-                    p_dec, load_fc_kwh, scens, x_plan, E_now, t1,
-                    e_terminal=e_day_end)
+                    p_dec, load_nom, pv_scens, x_plan, E_now, t1,
+                    e_terminal=e_day_end, load_scens=load_scens)
             else:
                 x_adj, E_adj = qp.adjust_day(
-                    p_dec, load_fc_kwh, pv_new, x_plan, E_now, t1,
+                    p_dec, load_nom, pv_new, x_plan, E_now, t1,
                     e_terminal=e_day_end)
             x_seq[t1:] = x_adj
             E_target[t1:] = E_adj
         t = t1
     seg = q2.exec_segment_causal(
-        load_kwh[108:144], pv_act_kwh[108:144], x_seq[108:144],
-        E_now, float(np.clip(E_target[143], E_MIN, E_MAX)),
+        load_act_kwh[108:144], pv_act_kwh[108:144], x_seq[108:144], E_now, None,
     )
     e_total[108:] = seg["e"]
     c_all[108:] = seg["c"]
@@ -493,18 +493,18 @@ def simulate_day_q3(data, p4, p_typ, vseq, D, price_mode="H", storage="daily",
 
 
 def run_year_q3(data, p4, p_typ, vseq, price_mode="H", storage="daily",
-                adj_hours=(6, 12, 18), hedge=True, n_scen=40, seed=7,
+                adj_hours=(6, 12, 18), hedge=True, n_scen=cs.N_SCEN, seed=7,
                 lam=0.7, adj_lam=0.7) -> list[dict]:
     E = E0
-    recs = []
-    for D in range(N_DAY):
+    recs: list[dict] = [{"D": D} for D in range(N_DAY)]  # 按日序号对齐
+    for D in range(REPORT_START, N_DAY):
         r = simulate_day_q3(
             data, p4, p_typ, vseq, D, price_mode=price_mode, storage=storage,
             adj_hours=adj_hours, hedge=hedge, n_scen=n_scen, seed=seed,
             lam=lam, adj_lam=adj_lam,
             e_start=(E0 if storage == "daily" else E),
         )
-        recs.append(r)
+        recs[D] = r
         E = r["E_end"] if storage == "2day" else E0
     return recs
 
@@ -693,7 +693,7 @@ def run_result43() -> None:
     t0 = time.time()
     data, p4, p_typ = load_q4_data()
     vseq = rolling_v_seq()
-    kw = dict(storage="2day", adj_hours=(6, 12, 18), hedge=True, n_scen=40, seed=7,
+    kw = dict(storage="2day", adj_hours=(6, 12, 18), hedge=True, n_scen=cs.N_SCEN, seed=7,
               lam=0.7, adj_lam=0.7)
     recs_h = run_year_q3(data, p4, p_typ, vseq, price_mode="H", **kw)
     recs_g = run_year_q3(data, p4, p_typ, vseq, price_mode="G", **kw)

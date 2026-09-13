@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 
 import program as pm
+from solve import consistency as cs
 from solve import q2
 from solve.common import E0, RESULTS_DIR, ROOT
 from solve.q2_adaptive import AdaptiveWeightModel
@@ -43,18 +44,13 @@ def seqs_grid(model: AdaptiveWeightModel, W: int):
 
 
 def seqs_ewma(model: AdaptiveWeightModel, hl: float):
-    """日费用行指数衰减加权（半衰期 hl 天）；hl≥1e8 退化为历史均值。"""
-    grid = model.grid
-    decay = float(np.exp(-np.log(2.0) / hl)) if hl < 1e8 else 1.0
-    M = None
-    for k in range(model.START, REPORT_START - 1):  # 预热：仅纳入 d=31 之前的历史日
-        M = model.C[k].copy() if M is None else decay * M + (1 - decay) * model.C[k]
-    out = []
-    for d in REP:
-        M = model.C[d - 1].copy() if M is None else decay * M + (1 - decay) * model.C[d - 1]
-        i, j = np.unravel_index(np.argmin(M), M.shape)
-        out.append((grid[i].copy(), grid[j].copy()))
-    return out
+    """日费用行指数衰减加权（半衰期 hl 天）；hl≥1e8 退化为历史均值。
+
+    统一实现见 ``consistency.ewma_weights_from_table``（唯一参数源）；
+    本函数仅做 {day: (w, u)} → 报送期列表的接口适配。
+    """
+    table = cs.ewma_weights_from_table(model.C, model.grid, hl=hl)
+    return [table[d] for d in REP]
 
 
 def seqs_risk(model: AdaptiveWeightModel, W: int, lam: float, q: float = 0.2):
@@ -241,7 +237,7 @@ def evaluate(model: AdaptiveWeightModel, configs: list[dict],
 
 def simulate_two_day(model: AdaptiveWeightModel, seq, kappa: float, margin: float,
                      detail: bool = False):
-    """2 日滚动正式口径：日末 SOC 自由、跨日连续，48 小时远端回到 E0。"""
+    """2 日滚动正式口径：日末 SOC 自由、跨日连续，规划窗口末端自由（不锚定）。"""
     E = float(E0)
     rows = []
     x_plans = np.zeros((q2.N_DAY, q2.T)) if detail else None
@@ -253,20 +249,18 @@ def simulate_two_day(model: AdaptiveWeightModel, seq, kappa: float, margin: floa
         # 光伏不能读取尚未实现的 P[d]，只能沿用 P[d−1]/P[d−2]/典型日组合。
         l1 = w[0] * model.L[d - 6] + w[1] * model.L[d - 13] + w[2] * model.L_typ
         p1 = u[0] * model.P[d - 1] + u[1] * model.P[d - 2] + u[2] * model.P_typ
-        l0 = np.clip(l0 * kappa, 0.0, None)
-        l1 = np.clip(l1 * kappa, 0.0, None)
-        p0 = np.clip(p0 - margin, 0.0, None)
-        p1 = np.clip(p1 - margin, 0.0, None)
+        l0 = cs.kappa_load(l0, kappa)
+        l1 = cs.kappa_load(l1, kappa)
+        p0 = cs.margin_pv(p0, margin)
+        p1 = cs.margin_pv(p1, margin)
         xh, Eh, _ = q2.plan_horizon(
             np.tile(model.price, 2), np.concatenate([l0, l1]) / 6.0,
-            np.concatenate([p0, p1]) / 6.0, E, E0, eps=EPS_PLAN,
+            np.concatenate([p0, p1]) / 6.0, E, None, eps=EPS_PLAN,
         )
         x = xh[:q2.T]
-        e_day_end = float(Eh[q2.T - 1])
-        ex = q2.exec_day_causal(
-            model.price, model.L[d] / 6.0, model.P[d] / 6.0, x, E,
-            e_end=e_day_end,
-        )
+        # 统一执行策略（consistency.EXEC_POLICY="free"）：无段末硬目标
+        ex = q2.exec_segment_causal(
+            model.L[d] / 6.0, model.P[d] / 6.0, x, E, None)
         if detail:
             x_plans[d] = x
             recs[d] = {
@@ -318,7 +312,7 @@ def rolling_holdout_search() -> pd.DataFrame:
         "问题二 2日滚动参数时间留出验证",
         out.head(10),
         note=("每个候选均按 48 小时预测窗口逐日滚动；当前日末 SOC 不固定并跨日传递，"
-              "仅视野远端回到 6000 kWh。2–6 月选参，7–12 月冻结验证；完整表见 "
+              "规划窗口末端完全自由（不锚定终值）。2–6 月选参，7–12 月冻结验证；完整表见 "
               "code/outputs/q2e_tune_2day_holdout.csv。"),
     )
     return out
@@ -618,8 +612,49 @@ def main():
     return summary
 
 
-def write_result2_tuned(W: float = 5.0, kappa: float = 1.015,
-                        margin: float = 75.0) -> dict:
+def joint_residual_mc(model, seq, kappa, margin, x_plans, e_start,
+                      n_years=100, seed=42):
+    """统一口径年度分布：固定计划，重采样（Δ负荷, Δ光伏）同月整日联合残差块。
+
+    名义 = κ·L̂ 与 max(P̂ − m, 0)（EWMA h=5 权重，构造同 ``simulate_two_day``）；
+    残差 = 实际 − 名义；池同月优先、严格取目标日之前（``consistency``）。
+    """
+    data = model.data
+    months = np.asarray(data["months"])
+    wu = cs.ewma_weights_from_table(model.C, model.grid, hl=cs.EWMA_HL,
+                                    first_target=15)
+    L_nom = np.zeros((q2.N_DAY, q2.T))
+    P_nom = np.zeros((q2.N_DAY, q2.T))
+    for d in range(15, q2.N_DAY):
+        w, u = wu[d]
+        l = w[0] * model.L[d - 7] + w[1] * model.L[d - 14] + w[2] * model.L_typ
+        p = u[0] * model.P[d - 1] + u[1] * model.P[d - 2] + u[2] * model.P_typ
+        L_nom[d] = cs.kappa_load(np.clip(l, 0.0, None), kappa) / 6.0
+        P_nom[d] = cs.margin_pv(np.clip(p, 0.0, None), margin) / 6.0
+    RL = data["load"] / 6.0 - L_nom
+    RP = data["pv_act"] / 6.0 - P_nom
+    rng = np.random.default_rng(seed)
+    emerg = np.zeros(n_years)
+    kwh = np.zeros(n_years)
+    for y in range(n_years):
+        E = float(e_start)
+        for d in REP:
+            pool = cs.scenario_indices(months, d)
+            j = int(rng.choice(pool))
+            load_s = np.clip(L_nom[d] + RL[j], 0.0, None)
+            pv_s = np.clip(P_nom[d] + RP[j], 0.0, None)
+            # 统一执行策略（free）：无段末硬目标
+            ex = q2.exec_segment_causal(load_s, pv_s, x_plans[d], E, None)
+            kwh[y] += float(ex["e"].sum())
+            emerg[y] += float(q2.EMERG_MULT * (model.price @ ex["e"]))
+            E = float(ex["E"][-1])
+        if (y + 1) % 20 == 0:
+            print(f"  MC(联合残差) {y + 1}/{n_years}")
+    return emerg, kwh
+
+
+def write_result2_tuned(W: float = 5.0, kappa: float = 1.02,
+                        margin: float = 50.0) -> dict:
     """把 2 日滚动时间留出选定配置写入 ``results/result2.xlsx``。
 
     流程：EWMA 权重序列 → 48 小时计划（当前日末 SOC 自由）→ 逐槽因果执行 →
@@ -646,6 +681,61 @@ def write_result2_tuned(W: float = 5.0, kappa: float = 1.015,
     out = q2.write_result2(model.dates, model.price, x_plans, recs, out_name="result2.xlsx")
     checks = _verify_result2(out, df)
     pm.save_outputs(df, "q2e_tuned_daily")
+
+    # ---- 官方口径图与年度成本分布（论文引用；全部来自本官方计划）----
+    import matplotlib.pyplot as plt
+
+    idx = np.arange(len(df))
+    month_starts = [i for i, s in enumerate(df["日期"]) if s.endswith("-01")]
+    month_labels = [df["日期"].iloc[i][5:7] + "月" for i in month_starts]
+
+    fig, ax = pm.line(idx, df["紧急购电量/kWh"].to_numpy(),
+                      xlabel="日期", ylabel="紧急购电量 / kWh")
+    ax.set_xticks(month_starts)
+    ax.set_xticklabels(month_labels)
+    pm.save_fig(fig, "Q2_逐日紧急购电", data=df[["日期", "紧急购电量/kWh"]])
+
+    fig2, ax2 = pm.line(
+        idx, [df["日初SOC/kWh"].to_numpy(), df["日末SOC/kWh"].to_numpy()],
+        labels=["日初储电量", "日末储电量"], xlabel="日期", ylabel="储电量 / kWh")
+    ax2.set_xticks(month_starts)
+    ax2.set_xticklabels(month_labels)
+    pm.save_fig(fig2, "Q2_储能轨迹",
+                data=df[["日期", "日初SOC/kWh", "日末SOC/kWh"]])
+
+    mc_costs, _mc_kwhs = joint_residual_mc(
+        model, seq, kappa, margin, x_plans,
+        float(df["日初SOC/kWh"].iloc[0]), n_years=100, seed=42)
+    total = plan + mc_costs
+    p95 = float(np.percentile(total, 95))
+    fig3, ax3 = plt.subplots(figsize=(7, 4.3))
+    ax3.hist(total, bins=30, color="#4C72B0", alpha=0.85, edgecolor="white")
+    ax3.axvline(total.mean(), color="#C44E52", ls="--",
+                label=f"均值 {total.mean():,.0f} 元")
+    ax3.axvline(p95, color="#55A868", ls=":", label=f"P95 {p95:,.0f} 元")
+    ax3.set_xlabel("年度总购电费 / 元")
+    ax3.set_ylabel("频数")
+    ax3.legend()
+    pm.save_fig(fig3, "Q2_总费用分布",
+                data=pd.DataFrame({"年度总购电费_元": total}))
+    record(
+        "问题二 年度总成本分布（2 日滚动·蒙特卡洛）",
+        {
+            "模拟年数": 100,
+            "年度总成本均值/元": float(total.mean()),
+            "年度总成本标准差/元": float(total.std()),
+            "P5/元": float(np.percentile(total, 5)),
+            "P50/元": float(np.percentile(total, 50)),
+            "P95/元": p95,
+            "CVaR95（尾部均值）/元": float(total[total >= p95].mean()),
+            "年度紧急费用均值/元": float(mc_costs.mean()),
+            "年度紧急费用P95/元": float(np.percentile(mc_costs, 95)),
+        },
+        note=("固定 2 日滚动官方计划，重采样（Δ负荷, Δ光伏）同月整日联合残差块"
+              "（相对统一名义预测 κ/m），保留日内与两通道相关；"
+              "逐日执行沿用统一策略 free（无段末硬目标）、SOC 跨日连续；"
+              "仅作事后风险评价，不参与在线决策；图 figures/Q2_总费用分布.pdf。"),
+    )
     record(
         f"问题二 口径E（2日滚动时间留出选定：EWMA h={W:g} + κ={kappa:g} + m={margin:g}）官方 result2",
         {
@@ -658,11 +748,13 @@ def write_result2_tuned(W: float = 5.0, kappa: float = 1.015,
         note=(
             f"官方 results/result2.xlsx 由 2 日滚动时间留出配置生成：2–6 月开发期选择 EWMA "
             f"h={W:g}、κ={kappa:g}、m={margin:g} kW，7–12 月冻结验证不参与选参；"
-            "当前日末 SOC 不固定并传递到下一日，仅 48 小时视野远端回到 6000 kWh。"
+            "每天以 48 小时为规划窗口、只执行次日，当前日末 SOC 不固定并传递到下一日，"
+            "规划窗口末端完全自由（不锚定任何终值）。"
             "旧 W=7 日循环版仍保留在 "
             "code/outputs/result2_W7_backup.xlsx，留出修正前版本保留在 "
             "code/outputs/result2_pre_2day_backup.xlsx；复现："
             "uv run python -m solve.q2_tune --result2。"
+            "图 figures/Q2_逐日紧急购电.pdf、Q2_储能轨迹.pdf、Q2_总费用分布.pdf。"
         ),
     )
     log.info("result2.xlsx（2 日滚动时间留出选定）写出完成：{}，总费用 {:.1f} 万元（计划 {:.1f} + 紧急 {:.1f}）",

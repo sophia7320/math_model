@@ -124,6 +124,31 @@ def audit_workbook(name: str, sheets: list[str], n_days: int, n_charge: int) -> 
         for r in wb["紧急购电量"].iter_rows(min_row=2, values_only=True):
             if r[2] is not None:
                 assert float(r[2]) >= -1e-7, (name, r[:3])
+
+    # 时间标签：与附件 5 模板一致（附件与模板标签相差一个 10 分钟刻度，
+    # 一律按行序号对齐；重写文件时不得改动模板标签）
+    tpl = openpyxl.load_workbook(DATA_C / "附件5" / name, read_only=True, data_only=True)
+    t_rows = list(tpl["计划购电量"].iter_rows(values_only=True))
+    hdr = next(wb["计划购电量"].iter_rows(min_row=1, max_row=1, values_only=True))
+
+    def _norm(v):
+        return None if v is None else str(v)
+
+    assert [_norm(v) for v in hdr] == [_norm(v) for v in t_rows[0]], (
+        name, "计划购电量表头/时段标签与附件 5 模板不一致")
+    if name == "result1.xlsx":
+        labels = [_norm(r[0]) for r in wb["计划购电量"].iter_rows(min_row=2, values_only=True)
+                  if r[0] is not None]
+        assert labels == [_norm(r[0]) for r in t_rows[1:]], (
+            name, "逐行时段标签与附件 5 模板不一致")
+    label_col = 0 if name == "result1.xlsx" else 1   # 充放电量表的“时间段”列
+    blocks = [str(r[label_col]) for r in wb["充放电量"].iter_rows(min_row=2, values_only=True)
+              if r[label_col] is not None]
+    expected_blocks = ["0:00-4:00", "4:00-8:00", "8:00-12:00",
+                       "12:00-16:00", "16:00-20:00", "20:00-24:00"]
+    assert blocks and all(b == expected_blocks[i % 6] for i, b in enumerate(blocks)), (
+        name, "充放电量块标签错误", blocks[:6])
+    tpl.close()
     wb.close()
 
 

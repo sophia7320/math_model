@@ -2,11 +2,12 @@
 
 主方案（探索结论，见 reports/Q3_方案探索报告.md 与 预测目标专题）：
 - 0:00 计划：组合预测 λ·官方f0 + (1−λ)·历史口E，λ=0.7；历史权重参数平滑 β=0.1
-- 6/12/18 调整：同组合口径的最新预报重优化未执行时段（6:00 决策 [6,12)，
-  12:00 决策 [12,18)，18:00 决策 [18,24)）
+- 6/12/18 调整：同组合口径的最新预报重优化未执行时段（口径 A：6:00 重优化 [6,24)、
+  12:00 重优化 [12,24)、18:00 重优化 [18,24)，只承诺执行未来 6 h）
 - 6:00/12:00 调整叠加场景对冲（残差块仅取自目标日之前，40 情景）
-- 储能：2 日预测窗口，每日只执行首日；日末 SOC 自由并跨日传递，48 小时远端回到 6000 kWh
-- 执行：逐槽因果（q2.exec_segment_causal，段末储能跟踪规划轨迹），缺口按 5 倍交易时刻电价紧急购电
+- 储能：2 日预测窗口，每日只执行首日；日末 SOC 自由并跨日传递，规划窗口末端完全自由
+  （不锚定终值）
+- 执行：逐槽因果 free（q2.exec_segment_causal，无段末硬目标），缺口按 5 倍交易时刻电价紧急购电
 - 结算：费用 = Σ[p·x_adj + 0.5·p·|x_plan − x_adj|] + 5·Σ p·e
 
 输出：
@@ -25,14 +26,14 @@ import openpyxl
 import pandas as pd
 
 import program as pm
+from solve import consistency as cs
 from solve import q2
 from solve import q3_proto as qp
 from solve.common import DATA_C, RESULTS_DIR, ROOT, T
 
-LAM = 0.7           # 0:00 组合权重（官方占比）
+LAM = 0.7           # 0:00 组合权重（官方占比；统一结构下重选见 q3e_tune_unified）
 ADJ_LAM = 0.7       # 调整层组合权重
-BETA = 0.1          # 历史权重平滑系数
-N_SCEN = 40         # 对冲情景数；3 种子收敛检查后由 10 升级为 40
+N_SCEN = cs.N_SCEN  # 对冲情景数（统一口径：40；唯一参数源 consistency.py）
 SEED = 7
 DAY_START = q2.REPORT_START      # 31（2025-02-01）
 N_Q3 = q2.N_DAY - DAY_START      # 334
@@ -230,8 +231,7 @@ def main():
     pm.init(seed=42, root=str(ROOT))
     log = pm.get_logger("q3")
     t0 = time.time()
-    data = qp.load_extended()
-    data["U_SMOOTH"] = qp.make_smooth_u(data, BETA)
+    data = qp.load_extended()  # 含 EWMA h=5 统一权重（consistency.py）
     print("基线对照……")
     base_noadj = run_baseline(data, "无调整（官方）", adj_hours=())
     base_off = run_baseline(data, "三点调整（官方）")
@@ -272,11 +272,14 @@ def main():
             **chk,
         },
         note=(
-            "主方案：负荷使用目标日前历史预测；0:00 光伏用组合预测"
-            "（λ=0.7·官方f0 + 0.3·历史口E，历史权重参数平滑 β=0.1）；"
+            f"统一口径（consistency.py）：负荷使用目标日前 EWMA h=5 权重预测并抬升 "
+            f"κ={cs.KAPPA:g}，"
+            f"0:00 光伏用组合预测（λ={LAM:g}·官方f0 + {1 - LAM:g}·历史 EWMA）"
+            f"并折减 m={cs.MARGIN:g} kW；"
             "6/12/18 点用同组合口径的最新预报调整；6:00/12:00 叠加无前视场景对冲"
-            f"（残差块仅取自目标日之前，{N_SCEN} 情景）；储能采用 2 日预测窗口滚动优化，"
-            "当前日末 SOC 不固定并传递到下一日，只有 48 小时视野远端回到 6000 kWh；"
+            f"（（Δ负荷, Δ光伏）同月整日联合残差块，{N_SCEN} 情景）；"
+            "储能采用 2 日预测窗口滚动优化，当前日末 SOC 不固定并传递到下一日，"
+            "规划窗口末端完全自由（不锚定终值）；"
             "逐槽因果执行（q2.exec_segment_causal，"
             "不读取未来实际值），缺口 5 倍紧急。结算 = Σ[p·x_adj + 0.5p|x_plan−x_adj|] + 5Σp·e。"
             "result3.xlsx 已生成并回读校验；图 figures/Q3_策略费用对比.pdf、Q3_逐日紧急购电.pdf、"

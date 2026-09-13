@@ -36,7 +36,7 @@ EPS_THROUGHPUT = 1e-3   # 执行 LP：抑制无意义充放的小罚项（元/kW
 EMERG_MULT = 5.0        # 紧急购电价倍数
 REPORT_START = 31       # 2025-02-01 的日序号（0 基）
 N_DAY = 365
-CAUSAL_POLICY_VERSION = "greedy-reachable-v1"   # 因果执行策略版本（参与缓存键）
+CAUSAL_POLICY_VERSION = "free-no-terminal-v1"   # 因果执行策略版本（参与缓存键）
 
 
 # ---- 预报误差模型（相对 (时刻,月) 期望出力；见 C题_预报误差分析.md）----
@@ -174,11 +174,13 @@ def plan_day(price, load_kwh, pv_kwh, e_start, eps=0.0):
     return res.x[0:T], res.x[4 * T:5 * T], res
 
 
-def plan_horizon(price_h, load_h, pv_h, e_start, e_terminal=E0, eps=0.0):
+def plan_horizon(price_h, load_h, pv_h, e_start, e_terminal=None, eps=0.0):
     """有限视野计划 LP；正式滚动策略使用 2 日（288 槽）视野。
 
-    只约束视野最远端 ``E(H)=e_terminal``，中间每个自然日的末端 SOC 都是
+    默认末端完全自由（``e_terminal=None``，正式口径）；传入数值时只约束视野
+    最远端 ``E(H)=e_terminal``（供结构对照）。中间每个自然日的末端 SOC 都是
     优化变量。每日只执行前 144 槽，次日以真实末端 SOC 重新求解。
+    变量块：0=x 购电 1=c 充电 2=d 放电 3=s 弃光 4=E。返回 (x, E, res)。
     """
     price_h = np.asarray(price_h, dtype=float)
     load_h = np.asarray(load_h, dtype=float)
@@ -190,8 +192,9 @@ def plan_horizon(price_h, load_h, pv_h, e_start, e_terminal=E0, eps=0.0):
     c_obj = np.zeros(n)
     c_obj[0:H] = price_h
     c_obj[H:3 * H] = eps
-    A_eq = lil_matrix((2 * H + 1, n))
-    b_eq = np.zeros(2 * H + 1)
+    n_rows = 2 * H + (1 if e_terminal is not None else 0)
+    A_eq = lil_matrix((n_rows, n))
+    b_eq = np.zeros(n_rows)
     for t in range(H):
         A_eq[t, t] = 1.0
         A_eq[t, H + t] = -1.0
@@ -205,8 +208,9 @@ def plan_horizon(price_h, load_h, pv_h, e_start, e_terminal=E0, eps=0.0):
         A_eq[r, H + t] = -ETA
         A_eq[r, 2 * H + t] = 1.0 / ETA
         b_eq[r] = e_start if t == 0 else 0.0
-    A_eq[2 * H, 5 * H - 1] = 1.0
-    b_eq[2 * H] = e_terminal
+    if e_terminal is not None:
+        A_eq[2 * H, 5 * H - 1] = 1.0
+        b_eq[2 * H] = float(e_terminal)
     bounds = (
         [(0.0, None)] * H
         + [(0.0, P_MAX_E)] * H
@@ -267,15 +271,19 @@ def exec_day(price, load_kwh, pv_kwh, x_plan, e_start):
     }
 
 
-def exec_segment_causal(load_kwh, pv_kwh, x_commit, e_start, e_end):
+def exec_segment_causal(load_kwh, pv_kwh, x_commit, e_start, e_end,
+                        no_purchase_charge: bool = False):
     """逐槽因果执行：每槽只使用当前已实现的负荷和光伏，不读取未来实际值。
 
     策略：先用储能吸收当前富余或填补当前缺口，再把下一时刻 SOC 投影到
     "仍能在剩余时段到达 e_end"的可达区间；无法被储能覆盖的缺口记为紧急购电，
-    富余且无法消纳的部分记为弃电。严格满足容量、功率与终端条件。
+    富余且无法消纳的部分记为弃电。
 
-    参数均为长度 m 的 kWh/槽序列；返回 c/d/s/E/e 五条序列。
-    说明：终端目标 e_end 需落在 m 步可达域内（真实段长 36 槽恒满足）。
+    可选策略开关（2026-09-13 增设，供"段末目标机制"对照实验）：
+    - ``e_end=None``：完全自由末端（仅受容量/功率约束，不做可达性投影）；
+    - ``no_purchase_charge=True``：禁止"为充能而紧急购电"——SOC 不得被抬升到
+      自然平衡点之上，段末目标允许偏离（偏差在返回值中报告）。
+    参数均为长度 m 的 kWh/槽序列；返回 c/d/s/E/e（另附诊断量）。
     """
     load_kwh = np.asarray(load_kwh, dtype=float)
     pv_kwh = np.asarray(pv_kwh, dtype=float)
@@ -284,8 +292,10 @@ def exec_segment_causal(load_kwh, pv_kwh, x_commit, e_start, e_end):
         raise ValueError("因果执行输入必须是一维序列")
     if not (len(load_kwh) == len(pv_kwh) == len(x_commit)):
         raise ValueError("因果执行的负荷、光伏与购电序列必须等长")
-    if not (E_MIN <= e_start <= E_MAX and E_MIN <= e_end <= E_MAX):
-        raise ValueError("因果执行的始末 SOC 超出安全区间")
+    if not (E_MIN <= e_start <= E_MAX):
+        raise ValueError("因果执行的初始 SOC 超出安全区间")
+    if e_end is not None and not (E_MIN <= e_end <= E_MAX):
+        raise ValueError("因果执行的末端 SOC 超出安全区间")
 
     m = len(load_kwh)
     c = np.zeros(m)
@@ -297,12 +307,18 @@ def exec_segment_causal(load_kwh, pv_kwh, x_commit, e_start, e_end):
     max_up = ETA * P_MAX_E          # 单槽最大充电量（kWh）
     max_down = P_MAX_E / ETA        # 单槽最大放电量（kWh）
     tol = 1e-8
+    cut_total = 0.0
 
     for i in range(m):
         remain = m - i - 1
-        # E_next 既要能由当前 SOC 一步到达，也要能在剩余槽回到 e_end
-        lo = max(E_MIN, e_now - max_down, float(e_end) - remain * max_up)
-        hi = min(E_MAX, e_now + max_up, float(e_end) + remain * max_down)
+        if e_end is None or no_purchase_charge:
+            # 自由末端（或禁止购电充能）：仅受容量与功率约束
+            lo = max(E_MIN, e_now - max_down)
+            hi = min(E_MAX, e_now + max_up)
+        else:
+            # E_next 既要能由当前 SOC 一步到达，也要能在剩余槽回到 e_end
+            lo = max(E_MIN, e_now - max_down, float(e_end) - remain * max_up)
+            hi = min(E_MAX, e_now + max_up, float(e_end) + remain * max_down)
         if lo > hi + tol:
             raise RuntimeError(
                 f"终端 SOC 不可达：i={i}, interval=[{lo:.6f}, {hi:.6f}]"
@@ -326,13 +342,19 @@ def exec_segment_causal(load_kwh, pv_kwh, x_commit, e_start, e_end):
         E[i] = e_next
         e_now = e_next
 
-    if m and abs(E[-1] - e_end) > 1e-6:
+    term_err = abs(E[-1] - float(e_end)) if e_end is not None else 0.0
+    if e_end is not None and m and not no_purchase_charge and term_err > 1e-6:
         raise RuntimeError(f"因果执行末端 SOC 偏差 {E[-1] - e_end:.3e} kWh")
-    return {"c": c, "d": d, "s": spill, "E": E, "e": emerg}
+    return {"c": c, "d": d, "s": spill, "E": E, "e": emerg,
+            "terminal_error_kwh": float(term_err)}
 
 
 def exec_day_causal(price, load_kwh, pv_kwh, x_plan, e_start, e_end=None):
-    """正式因果执行口径：不利用未来实际值，缺口按 5 倍价计费（价格仅在外层汇总）。"""
+    """旧版（日循环）因果执行包装：e_end=None 时终端取 e_start。
+
+    正式口径（``consistency.EXEC_POLICY="free"``）已改为无段末硬目标：
+    直接调用 ``exec_segment_causal(..., e_end=None)``；本函数仅供历史对照。
+    """
     del price
     return exec_segment_causal(
         load_kwh, pv_kwh, x_plan, e_start, e_start if e_end is None else e_end
@@ -378,18 +400,16 @@ def run_deterministic(data: dict):
         pv_fc = _hour_to_slots(fc0[d]) / 6.0          # kW → kWh/时段
         load_kwh = load[d] / 6.0
         # 48 小时滚动：次日无对应 0:00 官方预报，使用典型日作保守占位；
-        # 当前日末 SOC 由两日优化决定并跨日传递。
+        # 当前日末 SOC 由两日优化决定并跨日传递，规划窗口末端完全自由。
         xh, Eh, _ = plan_horizon(
             np.tile(price, 2),
             np.concatenate([load_kwh, data["load_typ"] / 6.0]),
             np.concatenate([pv_fc, data["pv_typ"] / 6.0]),
-            E, E0,
+            E, None,
         )
         x = xh[:T]
-        e_day_end = float(Eh[T - 1])
-        ex = exec_day_causal(
-            price, load_kwh, pv_act[d] / 6.0, x, E, e_end=e_day_end
-        )
+        # 统一执行策略（consistency.EXEC_POLICY="free"）：无段末硬目标
+        ex = exec_segment_causal(load_kwh, pv_act[d] / 6.0, x, E, None)
         recs.append({
             "x": x, "plan_cost": float(price @ x),
             "c": ex["c"], "d": ex["d"], "s": ex["s"], "e": ex["e"], "E": ex["E"],
@@ -422,10 +442,8 @@ def run_mc(data, x_plans, e_start_feb, e_targets, n_years=100, seed=42):
             pool = np.flatnonzero(months == months[d])
             zi = int(rng.choice(pool))
             pv_s = _hour_to_slots(_scenario_from_residual(fc0[d], residuals[zi])) / 6.0
-            ex = exec_day_causal(
-                price, load[d] / 6.0, pv_s, x_plans[d], E,
-                e_end=float(e_targets[d]),
-            )
+            # 统一执行策略（free）：无段末硬目标
+            ex = exec_segment_causal(load[d] / 6.0, pv_s, x_plans[d], E, None)
             emerg_kwhs[rep] += float(ex["e"].sum())
             emerg_costs[rep] += float(EMERG_MULT * (price @ ex["e"]))
             E = float(ex["E"][-1])

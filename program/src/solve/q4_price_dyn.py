@@ -46,9 +46,9 @@ def run_year_vseq(p4, p_typ, data, v_seq):
             np.concatenate([p_hat, p_hat1]),
             np.concatenate([qp.hist_load_forecast_asof(data, D, D),
                             qp.hist_load_forecast_asof(data, D + 1, D)]) / 6.0,
-            np.concatenate([q2._hour_to_slots(fc0[D]),
-                            qp.hist_forecast_asof(data, D + 1, D)]) / 6.0,
-            E, E0, eps=1e-3,
+                np.concatenate([q2._hour_to_slots(fc0[D]),
+                                qp.hist_forecast_asof(data, D + 1, D)]) / 6.0,
+                E, None, eps=1e-3,
         )
         x, e_day_end = xh[:T], float(Eh[T - 1])
         ex = q2.exec_day_causal(
