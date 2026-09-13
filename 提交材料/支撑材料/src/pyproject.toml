@@ -1,0 +1,51 @@
+[project]
+name = "program"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "sophia7320", email = "2060205344@qq.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "matplotlib>=3.11.1",
+    "numpy>=2.5.3",
+    "scipy>=1.18.1",
+    "sympy>=1.14.0",
+    "scikit-learn>=1.9.0",
+    "torch>=2.11.0",
+    "torchvision>=0.26.0",
+    "tqdm>=4.70.0",
+    "loguru>=0.7.3",
+    "pandas>=3.0.5",
+    "openpyxl>=3.1.5",
+    "pulp>=3.3.2",
+    "networkx>=3.6.1",
+    "statsmodels>=0.15.0",
+]
+
+[project.scripts]
+program = "program:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+  { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+
+[dependency-groups]
+dev = [
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.7.7",
+]
