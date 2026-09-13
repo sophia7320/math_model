@@ -1,6 +1,6 @@
 \section{复现说明与关键执行步骤}
 计算使用Python、NumPy、SciPy及HiGHS，结果表通过OpenPyXL回读。
-运行环境由uv管理，固定对冲种子为7、蒙特卡洛种子为42。复现时先进入随附Python工程目录。
+运行环境由uv管理；正式Q3无场景随机性，对冲扩展种子为7、蒙特卡洛种子为42。复现时先进入随附Python工程目录。
 命令及结果对应关系见表\ref{tab:repro}，求解中的微小正则项不计入正文购电费用。
 \begin{table}[htbp]\centering
 \caption{核心复现入口}\label{tab:repro}
@@ -14,7 +14,7 @@
 \texttt{uv run python -m solve.q4\_price\_fit} & 历史电价成本标定\\
 \texttt{uv run python -m solve.q4 --result4-2} & 波动价格无调整层\\
 \texttt{uv run python -m solve.q4 --result4-3} & 波动价格调整层\\
-\texttt{uv run python -m solve.q3\_sensitivity} & 情景与权重灵敏度\\
+\texttt{uv run python -m solve.q3\_ablation} & 正式方案与对冲扩展消融\\
 \bottomrule
 \end{tabularx}
 \end{table}

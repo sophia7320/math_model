@@ -4,28 +4,29 @@
 
 **当前主线：CUMCM 2026 C 题**（微网与外部电网电力调控，题面在 `CUMCM2026Problems/C题/`）。根目录工作笔记：`C题解读.md`、`C题_电网基础背景知识.md`、`C题_预报误差分析.md`、`C题_经验总结.md`——**写 C 题代码前先读「经验总结」**（口径、单位换算、储能终端条件、踩坑清单见 §1~§3）。另有早期 `A题_*.md` 笔记。
 
-**C 题进度（2026-09）**：Q1–Q4 官方结果齐全——`result1~3.xlsx`、**`result4-2.xlsx`（Q2 层：H 1558.6 / G 1547.8 万）与 `result4-3.xlsx`（Q3 层：H 1397.1 / G 1383.7 万）**，Q4 用 2 日滚动跨日结构 + H 主口径；**论文与验收已完成**（LaTeX/cumcmthesis，`paper/main.pdf` 21 页；`reports/VERIFY_REPORT.md` PASS；论文副本 `论文_CUMCM2026_C题.pdf`）。**2026-09-12 起全部正式数字按"逐槽因果执行"口径重算**；**2026-09-13 Q2 官方 result2 升级为调优版：EWMA h=5 + κ=1.02 + m=50 kW = 1406.6 万（原 W=7 版 1467.4 万，−4.14%）**，Q3 主方案 1327.8 万。论文素材（关键数字、负结果、口径讨论）：`reports/Q3_方案探索报告.md`、`reports/预测目标专题_精度最优vs决策最优.md`、`reports/Q2_参数与分布结构专题.md`（前两者部分数字为修订前口径，正式引用以 `RESULTS_REPORT.md` 为准）。
+**C 题进度（2026-09-13，v1.4）**：五份官方结果齐全。正式统一参数为 EWMA h=5、κ=1.02、m=25 kW；Q2 为 1395.7 万元。Q3 依据时间留出消融取消场景对冲，正式方案为“组合预测 + 6/12/18 三点调整 + 逐槽因果执行”，费用 1347.1 万元（对冲扩展 1349.2 万元）；取舍记录见 `reports/Q3_对冲取舍实验.md`。Q4 以附件4已知电价 G 为题面主口径：Q4-2 为 1459.8 万元，Q4-3 为 1410.3 万元（H 扩展分别为 1465.9、1418.4 万元）。Q2–Q4 均采用 2 日滚动、日末电量不固定且跨日连续、规划窗口末端自由。
 
 ## Python 一律用 uv（硬性约定，覆盖 skill 文档里的写法）
 
 各阶段 skill 文档中写的 `python3` / `pip install` 一律改用 uv 等价命令执行。
 
 - **代码全部放 `program/`**（uv 项目，Python 3.14）：工具箱包在 `program/src/program/`（`import program as pm`，11 模块）；**赛题求解代码放 `program/src/solve/`**，运行必须 cwd=`program/`（如 `uv run python -m solve.q3`）：
-  - 正式求解：`q1.py`（问题一）；`q2.py`（问题二口径 D）；`q2_adaptive.py`（口径 E 自适应加权历史模型；**官方 result2 已改由 `q2_tune.py --result2` 生成**，此脚本仅用于复现旧 W=7 版）；`q2_tune.py`（**Q2 参数搜索**：`--result2` 写官方调优版（EWMA h=5+κ=1.02+m=50）、`--fig-weights` 重生成 EWMA 权重图，整跑约 4 分钟）；`q3.py`（**问题三主方案，一键生成 result3.xlsx + 中文图 + 报告章节，约 1 分钟**）；`q3_sensitivity.py`（Q3 灵敏度：情景数/场景池窗口/λ，约 1 分钟）；`q4.py`（**问题四主程序：结构探针 `--probe` / `--probe-q3`，官方结果 `--result4-2` / `--result4-3`**）；`q2_arima.py`（ARIMA 对照，首次约 5 分钟）。
+  - 正式求解：`q1.py`（问题一）；`q2.py`（问题二口径 D）；`q2_adaptive.py`（口径 E 自适应加权历史模型；**官方 result2 已改由 `q2_tune.py --result2` 生成**，此脚本仅用于复现旧 W=7 版）；`q2_tune.py`（**Q2 参数搜索**：`--result2` 写官方调优版（EWMA h=5+κ=1.02+m=25）、`--fig-weights` 重生成 EWMA 权重图）；`q3.py`（**问题三正式无对冲方案，一键生成 result3.xlsx + 中文图 + 报告章节，约 20 秒**）；`q3_sensitivity.py`（已退出正式方案的对冲扩展灵敏度）；`q4.py`（**问题四主程序：结构探针 `--probe` / `--probe-q3`，官方结果 `--result4-2` / `--result4-3`**）；`q2_arima.py`（ARIMA 对照，首次约 5 分钟）。
   - 专题/探索（保留勿删）：`q2_bias.py` + `q2_bias_roll.py`（有偏预测 vs 场景对冲）；`q2e_smooth.py`（Q2E 平滑回测，负结果）；`q2_regsrc.py`（**回归参考量探索，已搁置**：探针 / `--full` / `--wr`，产物 `code/outputs/q2_regsrc_*.csv`）；`q3_ablation.py`（Q3 关键消融：对冲/组合/信息退化，写入报告章节）；`q3_proto.py`（**Q3 核心库**：三层结算 LP / 实时执行 / 场景对冲 / `fc_slots` 相位映射）及 `q3_proto_{seg,abl,rt,adjmix,final,lh,smooth}.py`；`q4_price_{eda,fit,dyn}.py`（Q4 电价结构/参数/动态修正）。
   - 测试：`tests/solve_causal_test.py`（因果执行/残差池回归）、`tests/c_results_audit.py`（**五份官方结果文件结构审计**，提交前固定检查）。
   - 早期脚本 `2.py`/`arima.py`/`data_reader.py`/`lp_model.py`/`solve1.py`/`solve2.py` 勿动。
 - **Q3 口径坑（改 Q3 相关代码前必读）**：
+  - **正式策略（v1.4）**：`consistency.Q3_USE_HEDGE=False`，Q3/Q4-3 不启用场景对冲；联合残差模块仅作可复现负结果扩展。不得把 `q3_sensitivity.py` 的对冲扩展结果写成正式方案。
   - **执行口径（2026-09-12 修订）**：正式口径为**逐槽因果执行**（`q2.exec_segment_causal`/`q2.exec_day_causal`，每槽只读当前已实现值）；`q2.exec_day`（全天事后 LP）与 `q3_proto.exec_segment_hindsight`（段内事后 LP）**只能当前视下界**，不得进入正式结果。前视会系统性低估紧急购电，别把"事后最优"当可实现策略。
   - **无前视场景池**：对冲/重采样只能用目标日之前的残差块（`q3_proto.causal_residual_pool`；池参数 `min_same_month`/`lookback` 经 `simulate_day_rt_hedge` 透传，默认 14/90，Q3 灵敏度用）；缓存的哈希必须含 `q2.CAUSAL_POLICY_VERSION`，改执行策略要升版本号（否则旧缓存会污染新结果）。
   - **相位**：`q2._hour_to_slots` 只适用于 0:00 发布的预报；6:00/12:00/18:00 发布的预报必须用 `q3_proto.fc_slots(fc24, 发布时刻)` 映射到槽，否则整体错位 6/12/18 小时（费用翻倍级错误）。
   - **信息退化**：调整层预报必须与 0:00 计划层同口径；调整层单用官方会抹掉组合预测的收益（λ=0.5 时"仅开 6:00"曾因此由改善转为恶化）。
   - **参数平滑适用性**：新旧混合 `β·new+(1−β)·old` 只对日频抖动大的权重有效（Q3 的 W=1 光伏权重，β≈0.1）；对已平滑的 W=7 负荷权重一律有害（Q2E 回测）。
   - **回归测试**：改执行/场景相关代码后跑 `uv run python tests/solve_causal_test.py`（因果执行约束回代 + 残差池无前视断言）。
-- **Q4 口径（已定稿）**：主口径 H（历史电价：滚动费用标定 v + β=0.1 动态修正），G（完全信息）作对照；正式结果为 **2 日滚动跨日结构**（`q4.py` 的 `plan_horizon`）。复现：`uv run python -m solve.q4 --result4-2` / `--result4-3`（各约 1–2 分钟）。**注意**：v 权重由 `code/outputs/q4_price_fit_daily.npz` 逐日费用表滚动选择，该表依赖执行口径——改执行策略后需 `uv run python -m solve.q4_price_fit` 重算（约 3 分钟）再跑 `q4.py`。
+- **Q4 口径（已定稿）**：主口径 G（附件4已知电价），H（历史电价预测：滚动费用标定 v + β=0.1 动态修正）作扩展；正式结果为 **2 日滚动跨日结构**（`q4.py` 的 `plan_horizon`）。复现：`uv run python -m solve.q4 --result4-2` / `--result4-3`。**注意**：v 权重由 `code/outputs/q4_price_fit_daily.npz` 逐日费用表滚动选择，该表依赖执行口径——改执行策略后需 `uv run python -m solve.q4_price_fit` 重算再跑 `q4.py`。
 - **产物统一落在工作区根**：
   - `figures/*.pdf`——**文件名中文**（如 `Q3_策略费用对比.pdf`），命名规范与逐图说明见 `figures/图表说明.md`；作图数据同步在 `code/outputs/figure_data/<同名>.csv`。非数据图（`技术路线图.pdf`、`Q2改进模型_流程图.pdf`，源 `.drawio`，生成记录 `reports/DRAWIO_REPORT.md`）也在本目录。新增/改名图后同步更新说明文档与代码里的 save 名。
-  - `reports/RESULTS_REPORT.md`（论文唯一数值来源）；`results/result*.xlsx`（共 5 个：`result1/2/3.xlsx` + `result4-2/4-3.xlsx`。`result2.xlsx` = 调优口径 1406.6 万，旧 W=7 版备份 `code/outputs/result2_W7_backup.xlsx`、旧 D 版 `result2_D_backup.xlsx`；`result3.xlsx` 由 `solve.q3` 生成 1327.8 万；`result4-2/4-3.xlsx` 由 `solve.q4` 生成）。
+  - `reports/RESULTS_REPORT.md`（论文唯一数值来源）；`results/result*.xlsx`（共 5 个：`result1/2/3.xlsx` + `result4-2/4-3.xlsx`。`result2.xlsx` = 1395.7 万，旧 W=7 版备份 `code/outputs/result2_W7_backup.xlsx`、旧 D 版 `result2_D_backup.xlsx`；`result3.xlsx` = v1.4 无对冲 1347.1 万；`result4-2/4-3.xlsx` 由 `solve.q4` 生成）。
   - `code/outputs/`：`cache/q2e/*.npz`（**只放官方表，`tag=q2e`**）、`cache/q2e_regsrc/*.npz`（回归源变体表，`RegSourceModel.CACHE_TAG`）——**q3_proto.load_extended 按 tag 选表，变体表不要写进 `cache/q2e`**；`cache/q2arima/*.npz` 删除后需重算约 13 分钟；`q4_price_fit_daily.npz` 为 Q4 电价逐日费用/误差表（动态修正复用它）。
   - 输出根由 `solve/common.py::workspace_root()` 解析（`MATHMODEL_ROOT` > `program/` 上一级 > cwd），不要另建输出目录。
 - 附件在 `program/data/C/`；`solve/data_reader.py` 用相对路径 `./data/C/...`——**运行这类脚本时 cwd 必须是 `program/`**。
