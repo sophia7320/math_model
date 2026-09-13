@@ -8,7 +8,8 @@
 #   调整购电量：同布局；第 147 列 = Σ_t [ p_t·x_adj,t + 0.5·p_t·|x_plan,t − x_adj,t| ]
 #               （调整结算：调低 50% 违约金、调高 150% 购电价）
 #   充放电量：每日 6 行（4 小时块），列 3/4 为块充/放电量；
-#             块 0/1 的行在列 5/6 记 "00:00"/"24:00" 与两端储电量
+#             块 0/1 的行在列 5/6 记 0:00（时间值，格式 h:mm，同模板）/
+#             "24:00"（文本，格式 @）与两端储电量
 #   紧急购电量：每个事件一行（日期、起止时间、电量 kWh），
 #               事件由 core.slots.emergency_events 合并相邻紧急槽得到
 #
@@ -19,6 +20,8 @@
 # ===========================================================================
 """
 from __future__ import annotations
+
+from datetime import time as _time
 
 import numpy as np
 import openpyxl
@@ -62,7 +65,11 @@ def _fill_adjust_sheet(ws, xa_list, xp_list, prices, dates=None) -> None:
 
 
 def _fill_charge_sheet(ws, entries) -> None:
-    """充放电量表：entries = [(日期对象, c, d, E_start, E_end)]，每日 6 个 4 小时块。"""
+    """充放电量表：entries = [(日期对象, c, d, E_start, E_end)]，每日 6 个 4 小时块。
+
+    清行重写会丢失模板示例行的单元格格式，因此按模板显式恢复：
+    日期列 mm-dd-yy；首块"时刻"= 时间值 0:00（h:mm）；次块 = 文本 "24:00"（@）。
+    """
     while ws.max_row > 1:
         ws.delete_rows(2)
     row = 2
@@ -70,28 +77,35 @@ def _fill_charge_sheet(ws, entries) -> None:
         for b in range(6):
             rr = row + b
             if b == 0:
-                ws.cell(row=rr, column=1, value=date_obj)
+                cell = ws.cell(row=rr, column=1, value=date_obj)
+                cell.number_format = "mm-dd-yy"
             ws.cell(row=rr, column=2, value=f"{4 * b}:00-{4 * (b + 1)}:00")
             ws.cell(row=rr, column=3, value=float(c[24 * b:24 * (b + 1)].sum()))
             ws.cell(row=rr, column=4, value=float(d[24 * b:24 * (b + 1)].sum()))
             if b == 0:
-                ws.cell(row=rr, column=5, value="00:00")
+                cell = ws.cell(row=rr, column=5, value=_time(0, 0))
+                cell.number_format = "h:mm"
                 ws.cell(row=rr, column=6, value=float(e_start))
             if b == 1:
-                ws.cell(row=rr, column=5, value="24:00")
+                cell = ws.cell(row=rr, column=5, value="24:00")
+                cell.number_format = "@"
                 ws.cell(row=rr, column=6, value=float(e_end))
         row += 6
 
 
 def _fill_emergency_sheet(ws, entries) -> None:
-    """紧急购电量表：entries = [(日期对象, e 槽序列)]，相邻紧急槽合并为一个事件。"""
+    """紧急购电量表：entries = [(日期对象, e 槽序列)]，相邻紧急槽合并为一个事件。
+
+    日期列按模板恢复为 mm-dd-yy（清行重写会丢失示例行格式）。
+    """
     while ws.max_row > 1:
         ws.delete_rows(2)
     row = 2
     for date_obj, e in entries:
         for j, (a, b, kwh) in enumerate(_events(e)):
             if j == 0:
-                ws.cell(row=row, column=1, value=date_obj)
+                cell = ws.cell(row=row, column=1, value=date_obj)
+                cell.number_format = "mm-dd-yy"
             ws.cell(row=row, column=2,
                     value=f"{_fmt_time(a * 10)}-{_fmt_time((b + 1) * 10)}")
             ws.cell(row=row, column=3, value=round(kwh, 4))

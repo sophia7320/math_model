@@ -110,8 +110,10 @@ def audit_workbook(name: str, sheets: list[str], n_days: int, n_charge: int) -> 
         e0s, e24s, charge_dates = [], [], []
         for i in range(n_days):
             block = charge[6 * i:6 * (i + 1)]
-            assert block[0][4] == "00:00" and block[1][4] == "24:00", (
-                name, i, "0:00/24:00 标签错误")
+            t0 = block[0][4]
+            assert ((t0 == "00:00") or
+                    (hasattr(t0, "strftime") and t0.strftime("%H:%M") == "00:00")) \
+                and block[1][4] == "24:00", (name, i, "0:00/24:00 标签错误")
             charge_dates.append(_as_date(block[0][0]))
             e0s.append(float(block[0][ec]))
             e24s.append(float(block[1][ec]))
