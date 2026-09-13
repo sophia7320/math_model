@@ -16,7 +16,7 @@
 | 问题二 自适应加权（口径 E，**官方 result2**） | 完成 | **1394.7 万元**（计划 1322.5 + 紧急 72.2；EWMA h=5 + κ=1.02 + m=50，2 日滚动 + free 执行） | `results/result2.xlsx`、`figures/Q2E_*.pdf`、`code/outputs/q2e_tune_*.csv` |
 | 问题二 ARIMA 预测对照 | 完成 | ARIMA(2,0,1) 2464.6 万元（负荷 MAE 638.9、光伏 152.6 kW；未建模周周期） | `figures/Q2ARIMA_*.pdf`、`code/outputs/q2_arima_*.csv` |
 | 问题三 日内滚动调整 | 完成 | 主方案（组合 λ=0.7 + 2 日滚动 + 三点调整 + 40 情景联合对冲 + free）**1350.8 万元**；对照 无调整 1455.7 → 三点官方 1358.9 | `results/result3.xlsx`、`figures/Q3_*.pdf`、`code/outputs/q3_daily.csv` |
-| 问题四 波动电价 | 完成 | **v1.2 已重算**：Q2 层 result4-2（G 1458.7 / H 1465.8 万）、Q3 层 result4-3（G 1414.1 / H 1422.2 万）；2 日滚动跨日结构，电价信息价值 0.48% / 0.57% | `results/result4-2.xlsx`、`result4-3.xlsx`、`figures/Q4_*.pdf` |
+| 问题四 波动电价 | 完成 | **v1.2 已重算**：Q2 层 result4-2（G 1458.7 / H 1465.3 万）、Q3 层 result4-3（G 1413.7 / H 1421.7 万）；2 日滚动跨日结构，电价信息价值 0.45% / 0.56% | `results/result4-2.xlsx`、`result4-3.xlsx`、`figures/Q4_*.pdf` |
 | 论文 | 待同步 | LaTeX（cumcmthesis）；正文数值与口径待随 v1.2 重算更新（todo P1-3） | `paper/main.pdf`、`论文_CUMCM2026_C题.pdf` |
 
 口径说明：`result2.xlsx`（官方结果文件）由 `q2_tune.py --result2` 按**时间留出冠军

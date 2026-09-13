@@ -8,6 +8,9 @@
   · 滚动 W=7 标定（可部署，无前视）
 
 运行（program/ 下）：uv run python -m solve.q4_price_fit
+
+口径（2026-09-13 统一 v1.2）：计划输入 = κ·L̂ 与 max(P̂−m,0)（consistency.py），
+执行 = 逐槽因果 free（无段末硬目标）；末端自由。表随执行/风险口径变化时须重跑。
 """
 from __future__ import annotations
 
@@ -17,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 import program as pm
+from solve import consistency as cs
 from solve import q2
 from solve.common import DATA_C, E0, ROOT, T
 from solve.data.attachments import load_extended
@@ -70,18 +74,17 @@ def main():
         for j, v in enumerate(grid):
             p_hat = forecast_price(D, v, p4, p_typ) if D >= 7 else p4[D]
             p_hat1 = forecast_price_next_asof(D, v, p4, p_typ)
-            load0 = hist_load_forecast_asof(data, D, D) / 6.0
-            load1 = hist_load_forecast_asof(data, D + 1, D) / 6.0
-            pv0 = q2._hour_to_slots(data["fc0"][D]) / 6.0
-            pv1 = hist_forecast_asof(data, D + 1, D) / 6.0
-            xh, Eh, _ = q2.plan_horizon(
+            load0 = cs.kappa_load(hist_load_forecast_asof(data, D, D)) / 6.0
+            load1 = cs.kappa_load(hist_load_forecast_asof(data, D + 1, D)) / 6.0
+            pv0 = cs.margin_pv(q2._hour_to_slots(data["fc0"][D])) / 6.0
+            pv1 = cs.margin_pv(hist_forecast_asof(data, D + 1, D)) / 6.0
+            xh, _Eh, _ = q2.plan_horizon(
                 np.concatenate([p_hat, p_hat1]), np.concatenate([load0, load1]),
                 np.concatenate([pv0, pv1]), E_state[j], None, eps=1e-3,
             )
-            x, e_day_end = xh[:T], float(Eh[T - 1])
-            ex = q2.exec_day_causal(
-                p4[D], data["load"][D] / 6.0, data["pv_act"][D] / 6.0, x, E_state[j],
-                e_end=e_day_end,
+            x = xh[:T]
+            ex = q2.exec_segment_causal(
+                data["load"][D] / 6.0, data["pv_act"][D] / 6.0, x, E_state[j], None,
             )
             E_state[j] = float(ex["E"][-1])
             daily_costs[D, j] = float(p4[D] @ x + q2.EMERG_MULT * (p4[D] @ ex["e"]))

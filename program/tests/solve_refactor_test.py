@@ -30,7 +30,7 @@ E0 = 6000.0
 GOLD_OBJ_Q1 = 1817.5053528737549
 GOLD_X_SUM = 13801.814739472791
 GOLD_EXEC = (11657.42226926288, 9442.512038102926, 0.0, 0.0, 6000.0)
-GOLD_CACHE_KEY = "a76f418adfbe"
+GOLD_CACHE_KEY = "2e1bd10564a7"
 
 
 def check_lp_golden() -> None:
@@ -103,7 +103,7 @@ def check_weights_golden() -> None:
     assert np.allclose(grid[20], [1.0, 0.0, 0.0])
     assert abs(float(grid.sum()) - 21.0) < 1e-9
 
-    assert q2.CAUSAL_POLICY_VERSION == "greedy-reachable-v1"
+    assert q2.CAUSAL_POLICY_VERSION == "free-no-terminal-v1"
 
     m = AdaptiveWeightModel(W=1)
     m.L = np.arange(365 * 144.0).reshape(365, 144) % 50

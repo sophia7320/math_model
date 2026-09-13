@@ -45,7 +45,11 @@ from solve.common import (
     ROOT,
     T,
 )
-from solve.core.causal import CAUSAL_POLICY_VERSION, exec_day_causal
+from solve.core.causal import (
+    CAUSAL_POLICY_VERSION,
+    exec_day_causal,
+    exec_segment_causal,
+)
 from solve.core.lp import plan_day
 from solve.data.attachments import load_all
 from solve.flows.q2_year import run_deterministic
@@ -264,11 +268,15 @@ class AdaptiveWeightModel:
     #     e = exec_day_causal(price, L/6, P/6, x, E0)     （逐槽因果执行）
     #     J = Σ p·x + 5·Σ p·e                             （计划费 + 紧急费）
     def day_cost(self, d: int, w, u) -> float:
-        """第 d 天实际总费用：按预测制定计划（take-or-pay）+ 按实际执行 + 紧急购电。"""
+        """第 d 天实际总费用：按预测制定计划（take-or-pay）+ 按实际执行 + 紧急购电。
+
+        执行口径与正式统一口径一致（``consistency.EXEC_POLICY="free"``）：
+        无段末硬目标，仅容量/功率约束。
+        """
         l_kwh, p_kwh = self.forecast(w, u, d)
         x, _E, _ = plan_day(self.price, l_kwh, p_kwh, E0, eps=self.EPS_PLAN)
-        ex = exec_day_causal(
-            self.price, self.L[d] / 6.0, self.P[d] / 6.0, x, E0
+        ex = exec_segment_causal(
+            self.L[d] / 6.0, self.P[d] / 6.0, x, E0, None
         )
         return float(self.price @ x + EMERG_MULT * (self.price @ ex["e"]))
 

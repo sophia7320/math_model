@@ -37,18 +37,20 @@ def price_forecast_d(D: int, v: np.ndarray, p4: np.ndarray, p_typ: np.ndarray) -
 def price_forecast_next(D: int, v: np.ndarray, p4: np.ndarray, p_typ: np.ndarray) -> np.ndarray:
     """day D+1 的预测（仅用 day D 可得信息）：P(D) 未知，用 P(D−1) 替代。
 
-    D<7 时历史价格不足，退化为典型日。
-    P̂(D+1) = v1·P4(D−1) + v2·P4(D−6) + v3·P̄_typ。
+    q4 年度流程专用（末端夹取到 N_DAY−1）。
     """
-    if D < 7:
-        return p_typ
     d1 = min(D + 1, N_DAY - 1)
     return v[0] * p4[d1 - 2] + v[1] * p4[d1 - 7] + v[2] * p_typ
 
 
 def forecast_price_next_asof(D, v, p4, p_typ):
-    """在 D 日 0:00 预测 D+1 电价，不读取 P(D)（``price_forecast_next`` 别名）。"""
-    return price_forecast_next(D, v, p4, p_typ)
+    """在 D 日 0:00 预测 D+1 电价，不读取 P(D)（电价参数拟合/动态修正用，末端不夹取）。
+
+    D<7 退化为典型日；P̂(D+1) = v1·P4(D−1) + v2·P4(D−6) + v3·P̄_typ。
+    """
+    if D < 7:
+        return p_typ
+    return v[0] * p4[D - 1] + v[1] * p4[D - 6] + v[2] * p_typ
 
 
 def rolling_v_star() -> np.ndarray:

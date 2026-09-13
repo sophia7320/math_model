@@ -10,7 +10,7 @@ import numpy as np
 
 from solve.common import E_MAX, E_MIN, ETA, P_MAX_E
 
-CAUSAL_POLICY_VERSION = "greedy-reachable-v1"   # 因果执行策略版本（参与缓存键）
+CAUSAL_POLICY_VERSION = "free-no-terminal-v1"   # 因果执行策略版本（参与缓存键）
 
 
 # ===========================================================================

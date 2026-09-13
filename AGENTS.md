@@ -4,7 +4,7 @@
 
 **当前主线：CUMCM 2026 C 题**（微网与外部电网电力调控，题面在 `CUMCM2026Problems/C题/`）。根目录工作笔记：`C题解读.md`、`C题_电网基础背景知识.md`、`C题_预报误差分析.md`、`C题_经验总结.md`——**写 C 题代码前先读「经验总结」**（口径、单位换算、储能终端条件、踩坑清单见 §1~§3）。另有早期 `A题_*.md` 笔记。
 
-**C 题进度（2026-09-13，统一口径 v1.2 定稿，五份官方结果已全部按 v1.2 重算）**：唯一参数源 `program/src/solve/consistency.py`（EWMA h=5 + κ=1.02 + m=50 + 联合残差 40 情景 + 2 日滚动/末端自由 + 执行器 free，守卫 `tests/model_consistency_test.py`）。**Q2 官方 `result2.xlsx` = 1394.7 万**（计划 1322.5 + 紧急 72.2）；**Q3 `result3.xlsx` = 1350.8 万**（计划 1297.5 + 调整 +20.0 + 紧急 33.3）；**Q4 `result4-2.xlsx` = G 1458.7 万（H 扩展 1465.8）**、**`result4-3.xlsx` = G 1414.1 万（H 扩展 1422.2）**；Q1 `result1.xlsx` 不变（35126.95 元/日）。**剩余待办：论文/图表数值同步（todo P1-2/P1-3）**。正式数字速查与交接清单见 `todo.md` 第五节；数值唯一来源 `reports/RESULTS_REPORT.md`；口径条款 `reports/模型一致性规范.md`；执行器证据 `reports/执行器段末目标实验.md`。
+**C 题进度（2026-09-13，统一口径 v1.2 定稿，五份官方结果已全部按 v1.2 重算）**：唯一参数源 `program/src/solve/consistency.py`（EWMA h=5 + κ=1.02 + m=50 + 联合残差 40 情景 + 2 日滚动/末端自由 + 执行器 free，守卫 `tests/model_consistency_test.py`）。**Q2 官方 `result2.xlsx` = 1394.7 万**（计划 1322.5 + 紧急 72.2）；**Q3 `result3.xlsx` = 1350.8 万**（计划 1297.5 + 调整 +20.0 + 紧急 33.3）；**Q4 `result4-2.xlsx` = G 1458.7 万（H 扩展 1465.3）**、**`result4-3.xlsx` = G 1413.7 万（H 扩展 1421.7）**；Q1 `result1.xlsx` 不变（35126.95 元/日）。**剩余待办：论文/图表数值同步（todo P1-2/P1-3）**。正式数字速查与交接清单见 `todo.md` 第五节；数值唯一来源 `reports/RESULTS_REPORT.md`；口径条款 `reports/模型一致性规范.md`；执行器证据 `reports/执行器段末目标实验.md`。
 
 ## Python 一律用 uv（硬性约定，覆盖 skill 文档里的写法）
 
@@ -34,6 +34,7 @@
 - **一次性探索脚本**（依赖未进 pyproject 时）用 `--no-project` 临时注入，依赖速记：数值计算 numpy,scipy,matplotlib,pandas / 符号计算 sympy / 深度学习 torch / 读表 openpyxl。
 - 不要用裸 `python` / `pip install`，也不要手动建/激活 venv（`.venv` 由 uv 维护）。
 - 脚本含中文输出时先设 `$env:PYTHONIOENCODING='utf-8'`；控制台是 PowerShell 5.1 且默认 GBK，列/搜中文文件名先设 `[Console]::OutputEncoding=[Text.Encoding]::UTF8`，读文件内容优先用 Read/Glob/Grep 工具而非 Get-Content。
+- **报告耗时（用户要求，2026-09-13）**：每次运行程序后，在回复中说明该次运行的耗时（脚本自带计时输出的一并引用）。
 - 一次性临时脚本写到 `C:\Users\sophia\AppData\Local\Temp\opencode`，不要散落在仓库根目录。
 - **重跑防重复**：`q3.py`、`q4.py`、`q3_ablation.py`、`q2_adaptive.py`、`q2_tune.py`、`q3_tune.py`、`q3_sensitivity.py`、`solve/experiments/q2_arima.py`、`solve/experiments/exec_policy_probe.py` 自带 `record()`（先删同名旧章节再追加）；其余脚本用追加模式的 `pm.record_result`，重跑前手动清理。
 - **多进程**：`solve/` 里用 `multiprocessing.Pool`（Windows 为 spawn）时，入口必须由 `if __name__ == "__main__":` 保护，否则子进程会递归导入主模块。

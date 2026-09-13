@@ -49,8 +49,8 @@ def run_year(data, p4, p_typ, vseq, price_mode="H", storage="2day",
     """
     load, pv_act = data["load"], data["pv_act"]
     E = E0
-    # 绝对日索引：recs[D] 与日序号 D 对齐（D < start 的位置为 None）
-    recs: list[dict | None] = [None] * start
+    # 按日序号对齐（D < start 的月份仅作预测预热，占位记录不计费）
+    recs: list[dict] = [{"D": D} for D in range(N_DAY)]
     for D in range(start, end):
         # 决策价格：G = 当天真实价；H = 三源预测（次日另用 D+1 预测）
         if price_mode == "G":
@@ -66,20 +66,18 @@ def run_year(data, p4, p_typ, vseq, price_mode="H", storage="2day",
 
         if storage == "daily":
             # 日循环：E(0)=E(24)=当前 SOC
-            x_day, E_plan, _ = plan_day(p_d, load_fc_d, pv_fc_d, E, eps=EPS_TH)
-            e_end = float(np.clip(E_plan[-1], E_MIN, E_MAX))
+            x_day, _E_plan, _ = plan_day(p_d, load_fc_d, pv_fc_d, E, eps=EPS_TH)
         else:
             # 48 小时滚动：次日负荷/光伏用 asof 无前视预测，窗口末端完全自由
             load_fc_d1 = cs.kappa_load(hist_load_forecast_asof(data, D + 1, D)) / 6.0
             pv_fc_d1 = cs.margin_pv(hist_forecast_asof(data, D + 1, D)) / 6.0
-            xh, Eh, _ = plan_horizon(
+            xh, _Eh, _ = plan_horizon(
                 np.concatenate([p_d, p_d1]),
                 np.concatenate([load_fc_d, load_fc_d1]),
                 np.concatenate([pv_fc_d, pv_fc_d1]),
-                E, None,
+                E, None, eps=EPS_TH,
             )
             x_day = xh[:T]
-            e_end = float(np.clip(Eh[T - 1], E_MIN, E_MAX))
 
         # 统一执行策略（free）：无段末硬目标
         ex = exec_segment_causal(load_act, pv_act[D] / 6.0, x_day, E, None)
@@ -90,14 +88,14 @@ def run_year(data, p4, p_typ, vseq, price_mode="H", storage="2day",
             rec["plan_cost"] = float(p4[D] @ x_day)
             rec["emerg"] = float(EMERG_MULT * (p4[D] @ ex["e"]))
             rec["total"] = rec["plan_cost"] + rec["emerg"]
-        recs.append(rec)
+        recs[D] = rec
         E = float(ex["E"][-1])
     return recs
 
 
 def total_of(recs) -> dict:
     """Q2 层费用汇总（仅计费日）：计划/紧急/合计与紧急电量。"""
-    days = [r for r in recs if r is not None and "total" in r]
+    days = [r for r in recs if "total" in r]
     return {
         "plan": sum(r["plan_cost"] for r in days),
         "emerg": sum(r["emerg"] for r in days),
@@ -218,8 +216,8 @@ def run_year_q3(data, p4, p_typ, vseq, price_mode="H", storage="daily",
                 lam=0.7, adj_lam=0.7) -> list[dict]:
     """Q4 Q3 层全年滚动（自 REPORT_START 起）：daily 回 E0；2day 跨日传递 SOC。"""
     E = E0
-    # 绝对日索引：recs[D] 与日序号 D 对齐（D < REPORT_START 的位置为 None）
-    recs: list[dict | None] = [None] * REPORT_START
+    # 按日序号对齐（占位记录仅用于索引对齐，不计费）
+    recs: list[dict] = [{"D": D} for D in range(N_DAY)]
     for D in range(REPORT_START, N_DAY):
         r = simulate_day_q3(
             data, p4, p_typ, vseq, D, price_mode=price_mode, storage=storage,
@@ -227,14 +225,14 @@ def run_year_q3(data, p4, p_typ, vseq, price_mode="H", storage="daily",
             lam=lam, adj_lam=adj_lam,
             e_start=(E0 if storage == "daily" else E),
         )
-        recs.append(r)
+        recs[D] = r
         E = r["E_end"] if storage == "2day" else E0
     return recs
 
 
 def total_of_q3(recs) -> dict:
     """Q3 层费用汇总（仅计费日）：计划/买入/偏差/紧急/合计、紧急与调整电量。"""
-    days = [r for r in recs if r is not None and r["D"] >= REPORT_START]
+    days = [r for r in recs if r["D"] >= REPORT_START]
     return {
         "plan": sum(r["plan_cost"] for r in days),
         "buy": sum(r["buy"] for r in days),
