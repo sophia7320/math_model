@@ -1,0 +1,19 @@
+\section{支撑材料文件列表}
+支撑材料压缩包的目录与文件应与表\ref{tab:support-list}逐项一致，用于支撑正文中的模型、结果与结论。
+其中，源程序应能够直接运行并复现主要数值结果；数据资料应附来源说明；较大篇幅的中间结果与论文图表放入 results/；人工智能工具使用情况另附 PDF 说明文件。
+
+\begin{table}[htbp]\centering
+\caption{支撑材料压缩包文件列表}\label{tab:support-list}
+\small
+\begin{tabularx}{\textwidth}{c l X}
+\toprule
+\textbf{序号} & \textbf{文件或目录} & \textbf{内容与用途} \\
+\midrule
+1 & \texttt{src/} & 产生正文全部数值、表格与图件的完整可运行源程序（Python/uv 工程）及运行说明 \\
+2 & \texttt{data/} & 题目附件 1--5（含结果模板）及数据来源与口径说明 \\
+3 & \texttt{results/} & 五份正式结果表、参数扫描与中间输出、论文图表 PDF \\
+4 & \texttt{AI工具使用详情.pdf} & AI 工具名称与版本、使用目的、关键交互记录、采纳内容及人工修改情况 \\
+5 & \texttt{README.txt} & 软件环境、依赖版本、随机种子与一键复现步骤 \\
+\bottomrule
+\end{tabularx}
+\end{table}

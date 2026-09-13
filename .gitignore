@@ -17,6 +17,9 @@ code/outputs/cache/
 *.ckpt
 *.onnx
 
+# ---- 提交材料打包产物（论文副本 + 支撑材料 ZIP + 解包目录，不入库）----
+提交材料/
+
 # ---- OpenCode（node_modules 与 skills Junction 不入库）----
 .opencode/node_modules/
 .opencode/skills/
