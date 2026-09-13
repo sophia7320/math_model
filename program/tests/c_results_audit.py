@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -154,9 +155,163 @@ def audit_workbook(name: str, sheets: list[str], n_days: int, n_charge: int) -> 
     wb.close()
 
 
+# ---------------------------------------------------------------------------
+# 物理与总量复核（2026-09-13 补充，独立于写出脚本）
+#   - 物理平衡（隐含弃光 ≥ 0）：xa/x + P + d + e = L + c + s
+#   - 块级充放功率限（4 h 块 ≤ 24×5000/6 kWh）
+#   - SOC 逐日递推：E24 = E0 + η·Σc − Σd/η
+#   - 紧急费包络：事件内价格上下界 × 电量（真值必落在包络内），
+#     并冻结报告口径的紧急费（万元）
+#   - 总量冻结：计划费 / 买入 / 偏差 / 调整净额（万元，报告口径）
+# ---------------------------------------------------------------------------
+ETA = 0.9
+DAY0 = date(2025, 2, 1)
+START_DAY = 31
+BLOCK_LIMIT = 24 * 5000.0 / 6.0  # 4 小时块充电/放电上限（kWh）
+
+EXPECTED_TOTALS = {  # 万元（RESULTS_REPORT v1.4 冻结口径）
+    "result1.xlsx": {"kwh": 59482.7, "cost": 35126.95},
+    "result2.xlsx": {"plan": 1316.0, "emerg": 79.6},
+    "result3.xlsx": {"plan": 1290.5, "net": 25.2, "emerg": 31.4},
+    "result4-2.xlsx": {"plan": 1367.0, "emerg": 92.8},
+    "result4-3.xlsx": {"buy": 1333.5, "dev": 36.3, "emerg": 40.5},
+}
+
+
+def _load_a2() -> tuple[np.ndarray, np.ndarray]:
+    wb = openpyxl.load_workbook(DATA_C / "附件2.xlsx", read_only=True, data_only=True)
+    load = np.asarray([[v for v in r[1:145]] for r in list(wb.active.values)[1:]], float)
+    pv = np.asarray([[v for v in r[1:145]] for r in list(wb["光伏发电实际功率"].values)[1:]],
+                    float)
+    wb.close()
+    return load, pv
+
+
+def _read_plan(ws) -> dict:
+    out = {}
+    for r in ws.iter_rows(min_row=2, values_only=True):
+        if r[0] is None:
+            continue
+        out[_as_date(r[0])] = np.asarray(r[1:145], float)
+    return out
+
+
+def _read_charge(ws, first: bool) -> dict:
+    rows = [r for r in ws.iter_rows(min_row=2, values_only=True) if r[1] is not None]
+    cc, dc, ec = (1, 2, 4) if first else (2, 3, 5)
+    out = {}
+    for i in range(len(rows) // 6):
+        b = rows[6 * i:6 * (i + 1)]
+        key = i if first else _as_date(b[0][0])
+        out[key] = (np.asarray([x[cc] for x in b], float),
+                    np.asarray([x[dc] for x in b], float),
+                    float(b[0][ec]), float(b[1][ec]))
+    return out
+
+
+def _parse_events(ws) -> dict:
+    """{日期: [(起始槽, 结束槽, kWh)]}；结束槽为开区间，跨日写法按当日末处理。"""
+    out: dict = {}
+    cur = None
+    for r in ws.iter_rows(min_row=2, values_only=True):
+        if r[0] is not None:
+            cur = _as_date(r[0])
+        if r[1] is None:
+            continue
+        m = re.match(r"(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})(\+1)?", str(r[1]))
+        assert m, (str(r[1]),)
+        a = int(m.group(1)) * 60 + int(m.group(2))
+        b = int(m.group(3)) * 60 + int(m.group(4))
+        if m.group(5) or b <= a:  # 跨日写法（如 0:00+1）
+            b = 24 * 60
+        out.setdefault(cur, []).append((a // 10, b // 10, float(r[2])))
+    return out
+
+
+def audit_physics(name: str) -> None:
+    static_price, dynamic_price = _prices()
+    wb = openpyxl.load_workbook(RESULTS / name, read_only=True, data_only=True)
+    exp = EXPECTED_TOTALS[name]
+
+    if name == "result1.xlsx":
+        wb1 = openpyxl.load_workbook(DATA_C / "附件1.xlsx", read_only=True, data_only=True)
+        rows = list(wb1.active.values)[1:145]
+        P1 = np.asarray([r[3] for r in rows], float) / 6.0
+        L1 = np.asarray([r[2] for r in rows], float) / 6.0
+        x = np.asarray([r[1] for r in wb["计划购电量"].iter_rows(min_row=2, values_only=True)
+                        if r[0] is not None], float)
+        c, d, e0, e24 = _read_charge(wb["充放电量"], first=True)[0]
+        assert abs(x.sum() - exp["kwh"]) < 0.05, (name, x.sum())
+        cost = float(static_price @ x)
+        assert abs(cost - exp["cost"]) < 0.05, (name, cost)
+        s_impl = float(x.sum() + P1.sum() + d.sum() - L1.sum() - c.sum())
+        assert -1e-6 <= s_impl <= 1e-3, (name, "隐含弃光", s_impl)
+        assert abs(e24 - (e0 + ETA * c.sum() - d.sum() / ETA)) < 1e-6, (name, "SOC 递推")
+        assert max(c.max(), d.max()) <= BLOCK_LIMIT + 1e-6, (name, "块级功率限")
+        wb.close()
+        return
+
+    load2, pv2 = _load_a2()
+    plan = _read_plan(wb["计划购电量"])
+    adj = _read_plan(wb["调整购电量"]) if "调整购电量" in wb.sheetnames else None
+    chg = _read_charge(wb["充放电量"], first=False)
+    ev = _parse_events(wb["紧急购电量"])
+    days = sorted(plan)
+    assert len(days) == 334, len(days)
+
+    plan_cost = buy = dev = 0.0
+    lo_all = hi_all = 0.0
+    worst_s = np.inf
+    max_soc = 0.0
+    max_block = 0.0
+    for dt in days:
+        D = (dt - DAY0).days + START_DAY
+        price = dynamic_price[dt] if name.startswith("result4-") else static_price
+        x = plan[dt]
+        plan_cost += float(price @ x)
+        if adj is not None:
+            xa = adj[dt]
+            buy += float(price @ xa)
+            dev += float((0.5 * price * np.abs(xa - x)).sum())
+            x_day = xa
+        else:
+            x_day = x
+        c, d, e0, e24 = chg[dt]
+        max_block = max(max_block, c.max(), d.max())
+        max_soc = max(max_soc, abs(e24 - (e0 + ETA * c.sum() - d.sum() / ETA)))
+        e_day = 0.0
+        for a, b, k in ev.get(dt, []):
+            assert 0 <= a < b <= 144, (name, dt, a, b)
+            seg = price[a:b]
+            lo_all += 5.0 * seg.min() * k
+            hi_all += 5.0 * seg.max() * k
+            e_day += k
+        Ld, Pd = load2[D] / 6.0, pv2[D] / 6.0
+        worst_s = min(worst_s, float(x_day.sum() + Pd.sum() + d.sum() + e_day
+                                     - Ld.sum() - c.sum()))
+
+    assert worst_s >= -1e-3, (name, "隐含弃光为负", worst_s)
+    assert max_soc < 1e-6, (name, "SOC 递推", max_soc)
+    assert max_block <= BLOCK_LIMIT + 1e-6, (name, "块级功率限", max_block)
+    wan = 1e4
+    if "plan" in exp:
+        assert abs(plan_cost / wan - exp["plan"]) < 0.1, (name, plan_cost / wan)
+    if "net" in exp:
+        assert abs((buy + dev - plan_cost) / wan - exp["net"]) < 0.1, (
+            name, (buy + dev - plan_cost) / wan)
+    if "buy" in exp:
+        assert abs(buy / wan - exp["buy"]) < 0.1, (name, buy / wan)
+        assert abs(dev / wan - exp["dev"]) < 0.1, (name, dev / wan)
+    e_seg = exp["emerg"] * wan
+    assert lo_all - 1e-6 <= e_seg <= hi_all + 1e-6, (
+        name, "紧急费包络", lo_all / wan, e_seg / wan, hi_all / wan)
+    wb.close()
+
+
 def main() -> None:
     for name, (sheets, n_days, n_charge) in EXPECTED.items():
         audit_workbook(name, sheets, n_days, n_charge)
+        audit_physics(name)
         print(f"ok - {name}")
     print("C result audit: PASS")
 
