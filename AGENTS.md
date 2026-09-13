@@ -4,7 +4,7 @@
 
 **当前主线：CUMCM 2026 C 题**（微网与外部电网电力调控，题面在 `CUMCM2026Problems/C题/`）。根目录工作笔记：`C题解读.md`、`C题_电网基础背景知识.md`、`C题_预报误差分析.md`、`C题_经验总结.md`——**写 C 题代码前先读「经验总结」**（口径、单位换算、储能终端条件、踩坑清单见 §1~§3）。另有早期 `A题_*.md` 笔记。
 
-**C 题进度（2026-09-13，统一口径 v1.2 定稿）**：唯一参数源 `program/src/solve/consistency.py`（EWMA h=5 + κ=1.02 + m=50 + 联合残差 40 情景 + 2 日滚动/末端自由 + 执行器 free，守卫 `tests/model_consistency_test.py`）。**Q2 官方 `result2.xlsx` = 1394.7 万**（计划 1322.5 + 紧急 72.2）；**Q3 `result3.xlsx` = 1350.8 万**（计划 1297.5 + 调整 +20.0 + 紧急 33.3）；Q1 `result1.xlsx` 不变（35126.95 元/日）。**Q4 `result4-2/4-3.xlsx` 为 G 主口径过渡版本，待按 v1.2 重算**（todo P1-1）；论文/图/报告数值待统一同步（todo P1-2/P1-3）。正式数字速查与交接清单见 `todo.md` 第五节；数值唯一来源 `reports/RESULTS_REPORT.md`；口径条款 `reports/模型一致性规范.md`；执行器证据 `reports/执行器段末目标实验.md`。
+**C 题进度（2026-09-13，统一口径 v1.2 定稿，五份官方结果已全部按 v1.2 重算）**：唯一参数源 `program/src/solve/consistency.py`（EWMA h=5 + κ=1.02 + m=50 + 联合残差 40 情景 + 2 日滚动/末端自由 + 执行器 free，守卫 `tests/model_consistency_test.py`）。**Q2 官方 `result2.xlsx` = 1394.7 万**（计划 1322.5 + 紧急 72.2）；**Q3 `result3.xlsx` = 1350.8 万**（计划 1297.5 + 调整 +20.0 + 紧急 33.3）；**Q4 `result4-2.xlsx` = G 1458.7 万（H 扩展 1465.8）**、**`result4-3.xlsx` = G 1414.1 万（H 扩展 1422.2）**；Q1 `result1.xlsx` 不变（35126.95 元/日）。**剩余待办：论文/图表数值同步（todo P1-2/P1-3）**。正式数字速查与交接清单见 `todo.md` 第五节；数值唯一来源 `reports/RESULTS_REPORT.md`；口径条款 `reports/模型一致性规范.md`；执行器证据 `reports/执行器段末目标实验.md`。
 
 ## Python 一律用 uv（硬性约定，覆盖 skill 文档里的写法）
 
