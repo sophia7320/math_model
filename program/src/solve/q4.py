@@ -40,6 +40,7 @@ from solve.data.attachments import load_q4_data
 from solve.flows.q4_year import (
     run_year,
     run_year_q3,
+    simulate_day_q3,  # noqa: F401  （公开 API：守卫测试校验默认对冲开关）
     total_of,
     total_of_q3,
 )
@@ -188,14 +189,14 @@ def make_figures_q3(data, recs_g, recs_h, s_g, s_h, daily_df) -> None:
 
 
 def run_result43() -> None:
-    """生成 result4-3：G·2 日·三点+40 场景对冲·组合；H 作扩展对照。"""
+    """生成 result4-3：G·2 日·三点调整·组合预测·无对冲；H 作扩展对照。"""
     pm.init(seed=42, root=str(ROOT))
     log = pm.get_logger("q4")
     t0 = time.time()
     data, p4, p_typ = load_q4_data()
     vseq = rolling_v_seq()
-    kw = dict(storage="2day", adj_hours=(6, 12, 18), hedge=True, n_scen=cs.N_SCEN, seed=7,
-              lam=0.7, adj_lam=0.7)
+    kw = dict(storage="2day", adj_hours=(6, 12, 18), hedge=cs.Q3_USE_HEDGE,
+              n_scen=cs.N_SCEN, seed=7, lam=cs.Q3_LAM, adj_lam=cs.Q3_ADJ_LAM)
     recs_h = run_year_q3(data, p4, p_typ, vseq, price_mode="H", **kw)
     recs_g = run_year_q3(data, p4, p_typ, vseq, price_mode="G", **kw)
     s_h, s_g = total_of_q3(recs_h), total_of_q3(recs_g)
@@ -239,14 +240,14 @@ def run_result43() -> None:
         },
         note=(
             "题面口径 G：0:00 计划使用附件 4 已知电价、历史负荷预测及组合光伏预测；"
-            "6/12/18 更新光伏并调整，6/12 使用 40 个严格无前视残差情景对冲，逐槽因果执行；"
+            "6/12/18 更新光伏并调整；正式方案关闭场景对冲，逐槽因果执行；"
             "采用 2 日滚动跨日储能并按附件 4 结算。H 不读取目标日价格，仅作扩展对照。"
             "图 figures/Q4_调整层策略对比.pdf、Q4_调整层逐日紧急购电.pdf；"
             "逐日表 code/outputs/q4_result43_daily.csv；探针表 code/outputs/q4_q3_probe.csv。"
         ),
     )
     record("问题四 Q3 层约束与校验", chk,
-           note="功率平衡、SOC 递推、区间、充放互斥与场景池无前视全部回代通过。")
+           note="功率平衡、SOC 递推、区间与充放互斥全部回代通过；正式方案未启用场景池。")
 
 
 def fig_weights() -> None:

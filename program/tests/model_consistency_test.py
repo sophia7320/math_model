@@ -16,7 +16,7 @@ import numpy as np
 
 import program as pm
 from solve import consistency as cs
-from solve import q2_tune, q3_proto
+from solve import q2_tune, q3, q3_proto, q4
 from solve.q2_adaptive import AdaptiveWeightModel
 from solve.common import ROOT
 
@@ -27,8 +27,10 @@ def main() -> None:
     # 1) 参数值 = 规范值
     assert cs.EWMA_HL == 5.0, cs.EWMA_HL
     assert cs.KAPPA == 1.02, cs.KAPPA
-    assert cs.MARGIN == 50.0, cs.MARGIN
+    assert cs.MARGIN == 25.0, cs.MARGIN
     assert cs.N_SCEN == 40, cs.N_SCEN
+    assert cs.Q3_LAM == 0.7 and cs.Q3_ADJ_LAM == 0.7
+    assert cs.Q3_USE_HEDGE is False
     assert cs.START_DAY == 31 and cs.PLAN_HORIZON == 288
 
     # 2) EWMA 序列唯一源
@@ -64,6 +66,10 @@ def main() -> None:
     assert sig2.parameters["margin"].default == cs.MARGIN
     assert sig2.parameters["exec_policy"].default == cs.EXEC_POLICY
     assert cs.EXEC_POLICY == "free"
+    assert q3.LAM == cs.Q3_LAM and q3.ADJ_LAM == cs.Q3_ADJ_LAM
+    assert q3.USE_HEDGE == cs.Q3_USE_HEDGE
+    assert inspect.signature(q4.simulate_day_q3).parameters["hedge"].default == cs.Q3_USE_HEDGE
+    assert inspect.signature(q4.run_year_q3).parameters["hedge"].default == cs.Q3_USE_HEDGE
 
     print("model consistency test: PASS")
 

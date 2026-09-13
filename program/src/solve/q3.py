@@ -1,10 +1,10 @@
 """C 题 问题三：预报驱动的日内调整（三层结算）——主方案、result3 与图表。
 
-主方案（探索结论，见 reports/Q3_方案探索报告.md 与 预测目标专题）：
-- 0:00 计划：组合预测 λ·官方f0 + (1−λ)·历史口E，λ=0.7；历史权重 EWMA h=5
+正式主方案（v1.4，见 reports/Q3_对冲取舍实验.md）：
+- 0:00 计划：组合预测 λ·官方f0 + (1−λ)·历史 EWMA，λ=0.7
 - 6/12/18 调整：同组合口径的最新预报重优化未执行时段（口径 A：6:00 重优化 [6,24)、
   12:00 重优化 [12,24)、18:00 重优化 [18,24)，只承诺执行未来 6 h）
-- 6:00/12:00 调整叠加场景对冲（残差块仅取自目标日之前，40 情景）
+- 不使用场景对冲；联合残差对冲仅作为负结果扩展保留在 q3_ablation.py
 - 储能：2 日预测窗口，每日只执行首日；日末 SOC 自由并跨日传递，规划窗口末端完全自由
   （不锚定终值）
 - 执行：逐槽因果 free（q2.exec_segment_causal，无段末硬目标），缺口按 5 倍交易时刻电价紧急购电
@@ -42,20 +42,23 @@ from solve.common import ROOT, T
 from solve.io.excel import verify_result3, write_result3
 from solve.io.report import record
 
-LAM = 0.7           # 0:00 组合权重（官方占比；统一结构下重选见 q3e_tune_unified）
-ADJ_LAM = 0.7       # 调整层组合权重
-N_SCEN = cs.N_SCEN  # 对冲情景数（统一口径：40；唯一参数源 consistency.py）
-SEED = 7
+LAM = cs.Q3_LAM
+ADJ_LAM = cs.Q3_ADJ_LAM
+USE_HEDGE = cs.Q3_USE_HEDGE
 DAY_START = q2.REPORT_START      # 31（2025-02-01）
 N_Q3 = q2.N_DAY - DAY_START      # 334
 
 
 def _day_result(data, D, e_start, **kw):
-    """主方案单日：组合预测 λ=0.7 + 调整层 λ=0.7 + 无前视对冲（40 情景）。"""
-    r = qp.simulate_day_rt_hedge(
-        data, D, LAM, adj_lam=ADJ_LAM, n_scen=N_SCEN, seed=SEED,
-        e_start=e_start, **kw,
-    )
+    if USE_HEDGE:  # 仅用于显式复现实验；正式唯一参数源固定为 False。
+        r = qp.simulate_day_rt_hedge(
+            data, D, LAM, adj_lam=ADJ_LAM, n_scen=cs.N_SCEN, seed=7,
+            e_start=e_start, **kw,
+        )
+    else:
+        r = qp.simulate_day_rt(
+            data, D, LAM, adj_lam=ADJ_LAM, e_start=e_start, **kw,
+        )
     return r
 
 
@@ -109,7 +112,7 @@ def make_figures(daily, base_noadj, base_off, out, dates):
     import matplotlib.pyplot as plt
 
     # 1) 策略费用对比（三策略 × 三构成）
-    names = ["无调整（官方）", "三点调整（官方）", "主方案（组合+对冲）"]
+    names = ["无调整（官方）", "三点调整（官方）", "主方案（组合无对冲）"]
     plan = [base_noadj["plan"] / 1e4, base_off["plan"] / 1e4,
             float(sum(daily["计划费/元"])) / 1e4]
     adj = [base_noadj["adj"] / 1e4, base_off["adj"] / 1e4,
@@ -121,7 +124,7 @@ def make_figures(daily, base_noadj, base_off, out, dates):
 
     # 2) 逐日紧急购电量
     fig, ax = pm.line(np.arange(N_Q3), [out["e"].sum(axis=1), base_off["e"].sum(axis=1)],
-                      labels=["主方案（组合+对冲）", "三点调整（官方）"],
+                      labels=["主方案（组合无对冲）", "三点调整（官方）"],
                       xlabel="日期（2025-02-01 起）", ylabel="紧急购电量 / kWh")
     pm.save_fig(fig, "Q3_逐日紧急购电",
                 data=pd.DataFrame({"日期": daily["日期"], "主方案紧急量/kWh": out["e"].sum(axis=1),
@@ -162,6 +165,7 @@ def main():
     chk["场景池前视违规天数"] = int(
         (daily["场景最大日序号"].to_numpy() >= day_idx).sum()
     )
+    chk["场景对冲是否启用"] = bool(USE_HEDGE)
 
     record(
         "问题三 主方案结果（2025-02-01 ~ 12-31，334 天）",
@@ -184,8 +188,8 @@ def main():
             f"κ={cs.KAPPA:g}，"
             f"0:00 光伏用组合预测（λ={LAM:g}·官方f0 + {1 - LAM:g}·历史 EWMA）"
             f"并折减 m={cs.MARGIN:g} kW；"
-            "6/12/18 点用同组合口径的最新预报调整；6:00/12:00 叠加无前视场景对冲"
-            f"（（Δ负荷, Δ光伏）同月整日联合残差块，{N_SCEN} 情景）；"
+            "6/12/18 点用同组合口径的最新预报调整；正式方案不使用场景对冲，"
+            "联合残差对冲仅保留为消融扩展；"
             "储能采用 2 日预测窗口滚动优化，当前日末 SOC 不固定并传递到下一日，"
             "规划窗口末端完全自由（不锚定终值）；"
             "逐槽因果执行（q2.exec_segment_causal，"

@@ -8,7 +8,7 @@
 #   执行：逐槽因果（free）；结算用附件 4 真实电价：Σ p4·x + 5·p4·e
 #
 # Q3 层（simulate_day_q3，G 主口径）
-#   0:00 计划 + 6/12/18 调整（6/12 叠加 40 情景联合残差对冲）；
+#   0:00 计划 + 6/12/18 调整（正式无对冲）；
 #   结算 = Σ [ p4·x_adj + 0.5·p4·|x_plan − x_adj| ] + 5·Σ p4·e
 # ===========================================================================
 """
@@ -106,13 +106,15 @@ def total_of(recs) -> dict:
 
 
 # ===========================================================================
-# Q4 Q3 层：0:00 计划 + 6/12/18 调整（+6/12 对冲），结算用附件 4 真实价
+# Q4 Q3 层：0:00 计划 + 6/12/18 调整；正式无对冲，结算用附件 4 真实价
 # ===========================================================================
 def simulate_day_q3(data, p4, p_typ, vseq, D, price_mode="H", storage="daily",
-                    adj_hours=(6, 12, 18), hedge=True, n_scen=cs.N_SCEN, seed=7,
-                    lam=0.7, adj_lam=0.7, kappa=cs.KAPPA, margin=cs.MARGIN,
+                    adj_hours=(6, 12, 18), hedge=cs.Q3_USE_HEDGE,
+                    n_scen=cs.N_SCEN, seed=7,
+                    lam=cs.Q3_LAM, adj_lam=cs.Q3_ADJ_LAM,
+                    kappa=cs.KAPPA, margin=cs.MARGIN,
                     e_start=E0, eps=EPS_TH) -> dict:
-    """Q4 Q3 层单日模拟（统一口径：EWMA 预测 + κ/m + 联合残差场景）。
+    """Q4 Q3 层单日模拟（正式：EWMA 预测 + κ/m + 三点调整、无对冲）。
 
     H 口径：决策价格 = 三源预测（滚动 v）；G：决策价格 = 当天真实价。
     storage='daily'：日循环（计划/调整末端回 E0）；'2day'：48 小时滚动、跨日连续。
@@ -212,8 +214,9 @@ def simulate_day_q3(data, p4, p_typ, vseq, D, price_mode="H", storage="daily",
 
 
 def run_year_q3(data, p4, p_typ, vseq, price_mode="H", storage="daily",
-                adj_hours=(6, 12, 18), hedge=True, n_scen=cs.N_SCEN, seed=7,
-                lam=0.7, adj_lam=0.7) -> list[dict]:
+                adj_hours=(6, 12, 18), hedge=cs.Q3_USE_HEDGE,
+                n_scen=cs.N_SCEN, seed=7,
+                lam=cs.Q3_LAM, adj_lam=cs.Q3_ADJ_LAM) -> list[dict]:
     """Q4 Q3 层全年滚动（自 REPORT_START 起）：daily 回 E0；2day 跨日传递 SOC。"""
     E = E0
     # 按日序号对齐（占位记录仅用于索引对齐，不计费）
