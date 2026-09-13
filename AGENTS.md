@@ -2,7 +2,7 @@
 
 数学建模竞赛工作区（CUMCM/华为杯/MCM 等）：最终交付物是竞赛论文 + 可复现代码 + 图表。代码统一放 `program/`（uv 项目，Python 3.14）；**整个工作区由根目录 `.git` 单仓库统一管理**（论文/结果/图表/报告/技能配置/代码；忽略缓存、`.venv` 与 LaTeX 中间产物，规则见根 `.gitignore`）。提交：`git add -A && git commit`（在根目录执行一次即含 `program/`）。
 
-**分支**：`master` 已过期；**`origin/gpt`（`c750749`）为最终代码**（v1.4：κ/m=1.02/25、Q3/Q4-3 正式关闭场景对冲），`tidy` 是同一逻辑的分层重构版（跟踪 `origin/tidy`，代码与产物已同步）。gpt 有新提交时按 diff 移植到 tidy，**不要直接 merge**（目录结构差异大）。
+**分支**：**`origin/gpt` 为最终代码来源**（最新 `b6385dc`：v1.4 + 数据日/周周期 EDA），`tidy` 是同一逻辑的分层重构版（跟踪 `origin/tidy`），**`master` 已于 2026-09-13 合入 tidy**（内容一致）。gpt 有新提交时按 diff 移植到 tidy，**不要直接 merge**（目录结构差异大），同步验证后再合入 master。
 
 **当前主线：CUMCM 2026 C 题**（微网与外部电网电力调控，题面在 `CUMCM2026Problems/C题/`）。根目录工作笔记：`C题解读.md`、`C题_电网基础背景知识.md`、`C题_预报误差分析.md`、`C题_经验总结.md`——**写 C 题代码前先读「经验总结」**（口径、单位换算、储能终端条件、踩坑清单见 §1~§3）。另有早期 `A题_*.md` 笔记。
 
@@ -15,7 +15,7 @@
 - **代码全部放 `program/`**（uv 项目，Python 3.14）：工具箱包在 `program/src/program/`（`import program as pm`，11 模块）；**赛题求解代码放 `program/src/solve/`**（2026-09-13 分层：`core/` 求解内核、`models/` 预测模型、`data/` 附件装载、`io/` 结果表与校验、`flows/` 年度/单日流程；顶层 q1~q4 等为入口或兼容门面），运行必须 cwd=`program/`（如 `uv run python -m solve.q3`）：
   - 正式求解：`q1.py`（问题一）；`q2.py`（问题二口径 D；`--write-result2-d` 写对照备份）；`q2_adaptive.py`（口径 E 门面，模型在 `models/adaptive.py`；**官方 result2 已改由 `q2_tune.py --result2` 生成**，此脚本仅用于复现旧 W=7 版）；`q2_tune.py`（**Q2 参数搜索**：`--result2` 按时间留出冠军写官方版（EWMA h=5+κ=1.02+m=25）、`--rolling-holdout` 重跑 2 日滚动留出验证、`--fig-weights` 重生成 EWMA 权重图）；`q3.py`（**问题三正式无对冲方案，一键生成 result3.xlsx + 中文图 + 报告章节，实测约 35 s**）；`q3_tune.py`（**Q3 对冲扩展历史参数搜索**：κ×m 粗筛 + λ 细选，开发期 2–6 月选参、7–12 月冻结，约 15 分钟）；`q3_sensitivity.py`（对冲扩展灵敏度：情景数/场景池窗口/λ）；`q4.py`（**问题四主程序：结构探针 `--probe` / `--probe-q3`，官方结果 `--result4-2` / `--result4-3`**）；`q4_price_fit.py`（Q4 电价逐日费用表，正式构建步骤）；`consistency.py`（**唯一参数源**，Q1–Q4 口径参数与统一构造，禁止别处另写常量）。
   - 兼容门面：`q2.py` / `q3_proto.py` / `q2_adaptive.py` 再导出旧 API（`plan_day`、`exec_segment_causal`、`simulate_day_rt_hedge`、`AdaptiveWeightModel`、`fc_slots` 等），`tests/`、`program/experiments/q3_dl/` 与探索脚本可继续按旧名导入。
-  - 专题/探索（保留勿删，均在 `solve/experiments/`，命令前缀 `-m solve.experiments.`）：`q2_arima`（ARIMA 对照，首次约 5 分钟）；`q2_bias` + `q2_bias_roll`（有偏预测 vs 场景对冲，历史口径）；`q2e_smooth`（Q2E 平滑回测，负结果）；`q2_regsrc`（**回归参考量探索，已搁置**：探针 / `--full` / `--wr`，产物 `code/outputs/q2_regsrc_*.csv`）；`q2e_structure`（误差分布结构，q2_tune 参考值来源）；`q3_proto_{seg,abl,rt,adjmix,final,lh,smooth}`（Q3 原型批次）；`q4_price_eda` / `q4_price_dyn`（电价 EDA / β 动态修正验证）；`exec_policy_probe`（**执行器段末目标对照探针**，证据写入 RESULTS_REPORT 与 `reports/执行器段末目标实验.md`）。`q3_ablation.py`（Q3 关键消融：对冲/组合/信息退化，写入报告章节）仍在顶层。
+  - 专题/探索（保留勿删，均在 `solve/experiments/`，命令前缀 `-m solve.experiments.`）：`q2_arima`（ARIMA 对照，首次约 5 分钟）；`q2_bias` + `q2_bias_roll`（有偏预测 vs 场景对冲，历史口径）；`q2e_smooth`（Q2E 平滑回测，负结果）；`q2_regsrc`（**回归参考量探索，已搁置**：探针 / `--full` / `--wr`，产物 `code/outputs/q2_regsrc_*.csv`）；`q2e_structure`（误差分布结构，q2_tune 参考值来源）；`q3_proto_{seg,abl,rt,adjmix,final,lh,smooth}`（Q3 原型批次）；`q4_price_eda` / `q4_price_dyn`（电价 EDA / β 动态修正验证）；`eda_cycles`（**附件数据日/周周期 EDA**：论文数据理解主图 + 报告章节，约 2 s）；`exec_policy_probe`（**执行器段末目标对照探针**，证据写入 RESULTS_REPORT 与 `reports/执行器段末目标实验.md`）。`q3_ablation.py`（Q3 关键消融：对冲/组合/信息退化，写入报告章节）仍在顶层。
   - 测试：`tests/solve_causal_test.py`（因果执行/残差池/发布时刻残差/对冲 1/S 归一）、`tests/model_consistency_test.py`（**唯一参数源与统一构造守卫**）、`tests/solve_refactor_test.py`（**金标**：LP 等价、槽位相位、缓存哈希、门面 API）、`tests/c_results_audit.py`（**五份官方结果文件结构审计**：日期连续、费用重算、跨日 SOC，提交前固定检查）。
   - 早期脚本已迁至 `solve/legacy/`（`2.py`/`arima.py`/`data_reader.py`/`lp_model.py`/`solve1.py`/`solve2.py`，内容原样保留）。
 - **Q3 口径坑（改 Q3 相关代码前必读）**：
