@@ -654,7 +654,7 @@ def joint_residual_mc(model, seq, kappa, margin, x_plans, e_start,
 
 
 def write_result2_tuned(W: float = 5.0, kappa: float = 1.02,
-                        margin: float = 50.0) -> dict:
+                        margin: float = 25.0) -> dict:
     """把 2 日滚动时间留出选定配置写入 ``results/result2.xlsx``。
 
     流程：EWMA 权重序列 → 48 小时计划（当前日末 SOC 自由）→ 逐槽因果执行 →
