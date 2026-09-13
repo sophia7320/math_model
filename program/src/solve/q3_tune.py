@@ -1,7 +1,7 @@
-"""Q3 统一结构下的风险参数时间留出选择（λ / κ / m）。
+"""Q3 对冲扩展下的历史风险参数时间留出实验（λ / κ / m）。
 
 在统一结构（2 日滚动 + 因果负荷 + EWMA h=5 预测 + κ/m + （Δ负荷, Δ光伏）联合残差
-40 情景对冲）下，对 Q3 主方案做两级扫描：
+40 情景对冲）下，对已退出正式方案的扩展模型做两级扫描：
 
 A. 粗筛：λ=0.7 固定，κ∈{1.0, 1.01, 1.015, 1.02} × m∈{0, 25, 50, 75}（16 组）；
 B. 细选：最优 (κ, m) 上，λ∈{0.3, 0.5, 0.7, 0.9, 1.0}（5 组）。
@@ -27,6 +27,7 @@ import program as pm
 from solve import consistency as cs
 from solve import q3_proto as qp
 from solve.common import ROOT
+from solve.io.report import record
 
 REP = list(range(cs.START_DAY, 365))
 LAM_FIX = 0.7
@@ -69,19 +70,6 @@ def _task(cfg) -> dict:
             "全年描述值/万元": round(dev + val, 1)}
 
 
-def record(section: str, data, note: str = "") -> None:
-    path = pm.reports_dir() / "RESULTS_REPORT.md"
-    if path.exists():
-        text = path.read_text(encoding="utf-8")
-        marker = f"### {section}"
-        pos = text.find(marker)
-        if pos != -1:
-            end = text.find("\n### ", pos + len(marker))
-            text = text[:pos] if end == -1 else text[:pos] + text[end + 1:]
-            path.write_text(text, encoding="utf-8")
-    pm.record_result(section, data, note=note)
-
-
 def _run(payload, cfgs, workers=WORKERS) -> pd.DataFrame:
     with Pool(workers, initializer=_init_worker, initargs=(payload,)) as pool:
         rows = pool.map(_task, cfgs)
@@ -95,7 +83,7 @@ def main() -> None:
     split = next(i for i, d in enumerate(REP)
                  if data["dates"][d] == cs.HOLDOUT_VAL_START)
     payload = {"data": data, "split": split}
-    print(f"统一结构参数搜索：开发期到 2025-06-30（{split} 天），"
+    print(f"对冲扩展历史参数搜索：开发期到 2025-06-30（{split} 天），"
           f"冻结验证期起 {cs.HOLDOUT_VAL_START}；情景数 {cs.N_SCEN}，workers={WORKERS}")
 
     # ---------- A. 粗筛 κ × m（λ 固定） ----------
@@ -150,17 +138,17 @@ def main() -> None:
                                 fine.assign(阶段="细选λ")], ignore_index=True))
 
     # ---------- 报告 ----------
-    record("问题三 统一结构参数搜索：粗筛（κ×m）", coarse,
-           note=("统一结构（2 日滚动+因果负荷+EWMA+联合残差 40 情景对冲）下，"
+    record("问题三 对冲扩展历史参数搜索：粗筛（κ×m）", coarse,
+           note=("已退出正式方案的对冲扩展（2 日滚动+因果负荷+EWMA+联合残差 40 情景）下，"
                  f"λ={LAM_FIX:g} 固定，κ∈{KAPPA_GRID}、m∈{MARGIN_GRID}；"
                  "开发期 2–6 月选参，7–12 月冻结验证；常用随机数（seed=7）。"))
-    record("问题三 统一结构参数搜索：λ 细选", fine,
+    record("问题三 对冲扩展历史参数搜索：λ 细选", fine,
            note=(f"在粗筛最优 (κ,m)=({best['kappa']:g},{best['margin']:g}) 上扫描 "
                  f"λ∈{LAM_GRID}；开发期选择、冻结验证。"))
-    record("问题三 统一结构参数搜索：汇总",
+    record("问题三 对冲扩展参数搜索：汇总",
            pd.DataFrame([{"阶段": "粗筛", **best.to_dict()},
                          {"阶段": "细选", **best2.to_dict()}]),
-           note=("正式 λ/κ/m 由开发期选择；验证期仅报告排名。"
+           note=("这是对冲扩展的历史搜索，不再决定 v1.4 正式策略；验证期仅报告排名。"
                  "完整表见 code/outputs/q3e_tune_unified_*.csv；"
                  "图 figures/Q3E_参数搜索.pdf。"))
     print(f"完成，用时 {time.time() - t0:.0f}s")

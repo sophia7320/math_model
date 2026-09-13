@@ -1,0 +1,24 @@
+\section{符号说明}
+\begin{table}[htbp]\centering
+\caption{主要符号、含义与单位}\label{tab:symbol}
+\small
+\begin{tabularx}{\textwidth}{p{.20\textwidth}Xp{.15\textwidth}}
+\toprule
+符号 & 含义 & 单位\\\midrule
+$d,t;\ T,H$ & 日期、日内槽；日槽数144、规划槽数288 & ---\\
+$L_{d,t},P_{d,t}$ & 实际负荷、光伏电量 & kWh\\
+$\widehat L,\widehat P$ & 决策时刻可得的预测电量 & kWh\\
+$p_{d,t}$ & 交易电价 & 元/kWh\\
+$x^0_{d,t},x^a_{d,t}$ & 零点计划、各槽最终有效调整购电量 & kWh\\
+$c_{d,t},q_{d,t}$ & 充入、放出的电网侧电量 & kWh\\
+$E_{d,t}$ & 时段末储能电量 & kWh\\
+$e_{d,t},s_{d,t}$ & 紧急购电量、富余弃电量 & kWh\\
+$\eta,\bar c$ & 单向效率0.9、单槽充放上限$5000/6$ & ---、kWh\\
+$w_d,u_d$ & 历史负荷、光伏的三源凸组合权重 & ---\\
+$h,\kappa,m$ & EWMA半衰期、负荷抬升、光伏折减 & 天、---、kW\\
+$\lambda,S$ & 官方光伏预报占比、情景数 & ---\\
+$\mathcal I_{d,t}$ & 决策时刻已获得的信息集合 & ---\\
+\bottomrule
+\end{tabularx}
+\end{table}
+带上标$s$的变量表示第$s$个情景，$[z]_+=\max(z,0)$。下文未列出的局部辅助变量在首次出现时定义。

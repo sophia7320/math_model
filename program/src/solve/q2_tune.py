@@ -8,7 +8,7 @@ C. 风险目标：窗口选择目标改成 (1−λ)·均值 + λ·CVaR20（日�
 D. 权重收缩：w ← (1−α)·w* + α/3（抑制极端权重）。
 E. 精扫与稳健性：κ 细网格、κ×m、κ×小时裕度、动态 κ、分半验证。
 
-参考值来自 `q2e_structure.py`（报童临界比 0.8 → 残差分位数）。
+参考值来自 `solve/experiments/q2e_structure.py`（报童临界比 0.8 → 残差分位数）。
 运行（在 program/ 下）：uv run python -m solve.q2_tune
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ from solve import consistency as cs
 from solve import q2
 from solve.common import E0, RESULTS_DIR, ROOT
 from solve.q2_adaptive import AdaptiveWeightModel
-from solve.q2e_structure import forecast_kw, record
+from solve.io.report import record
 
 REPORT_START = q2.REPORT_START
 REP = list(range(REPORT_START, q2.N_DAY))
@@ -91,7 +91,7 @@ def net_residuals(model: AdaptiveWeightModel, ws_list):
     lh = np.empty_like(e)
     for i, d in enumerate(REP):
         w, u = ws_list[i]
-        l, p = forecast_kw(model, w, u, d)
+        l, p = model.forecast_kw(w, u, d)
         lh[i] = np.clip(l, 0.0, None)
         e[i] = (model.L[d] - model.P[d]) - (l - p)
     return e, lh
@@ -113,7 +113,7 @@ def margin_refs(model: AdaptiveWeightModel, seq, months) -> dict:
     ratios = []
     for i, d in enumerate(REP):
         w, u = seq[i]
-        l, p = forecast_kw(model, w, u, d)
+        l, p = model.forecast_kw(w, u, d)
         mask = p > 500.0
         if mask.any():
             ratios.append(e[i][mask] / p[mask])
@@ -244,7 +244,7 @@ def simulate_two_day(model: AdaptiveWeightModel, seq, kappa: float, margin: floa
     recs = [None] * q2.N_DAY if detail else None
     for i, d in enumerate(REP):
         w, u = seq[i]
-        l0, p0 = forecast_kw(model, w, u, d)
+        l0, p0 = model.forecast_kw(w, u, d)
         # 次日预测在 d 日 0:00 形成：负荷的 d+1−7/d+1−14 已知；
         # 光伏不能读取尚未实现的 P[d]，只能沿用 P[d−1]/P[d−2]/典型日组合。
         l1 = w[0] * model.L[d - 6] + w[1] * model.L[d - 13] + w[2] * model.L_typ
@@ -568,7 +568,7 @@ def main():
     pm.save_fig(fig, "Q2E_参数搜索", data=fig_data)
 
     # ---------- 报告 ----------
-    from solve.q2e_structure import record
+    from solve.io.report import record
 
     record(
         "问题二 口径E 参数搜索：标定窗口与 EWMA",
@@ -612,7 +612,7 @@ def main():
     return summary
 
 
-def joint_residual_mc(model, seq, kappa, margin, x_plans, targets, e_start,
+def joint_residual_mc(model, seq, kappa, margin, x_plans, e_start,
                       n_years=100, seed=42):
     """统一口径年度分布：固定计划，重采样（Δ负荷, Δ光伏）同月整日联合残差块。
 
@@ -653,8 +653,8 @@ def joint_residual_mc(model, seq, kappa, margin, x_plans, targets, e_start,
     return emerg, kwh
 
 
-def write_result2_tuned(W: float = 5.0, kappa: float = 1.015,
-                        margin: float = 75.0) -> dict:
+def write_result2_tuned(W: float = 5.0, kappa: float = 1.02,
+                        margin: float = 25.0) -> dict:
     """把 2 日滚动时间留出选定配置写入 ``results/result2.xlsx``。
 
     流程：EWMA 权重序列 → 48 小时计划（当前日末 SOC 自由）→ 逐槽因果执行 →
@@ -703,11 +703,8 @@ def write_result2_tuned(W: float = 5.0, kappa: float = 1.015,
     pm.save_fig(fig2, "Q2_储能轨迹",
                 data=df[["日期", "日初SOC/kWh", "日末SOC/kWh"]])
 
-    targets = np.zeros(q2.N_DAY)
-    for i, d in enumerate(REP):
-        targets[d] = float(df["日末SOC/kWh"].iloc[i])
     mc_costs, _mc_kwhs = joint_residual_mc(
-        model, seq, kappa, margin, x_plans, targets,
+        model, seq, kappa, margin, x_plans,
         float(df["日初SOC/kWh"].iloc[0]), n_years=100, seed=42)
     total = plan + mc_costs
     p95 = float(np.percentile(total, 95))
@@ -736,8 +733,8 @@ def write_result2_tuned(W: float = 5.0, kappa: float = 1.015,
         },
         note=("固定 2 日滚动官方计划，重采样（Δ负荷, Δ光伏）同月整日联合残差块"
               "（相对统一名义预测 κ/m），保留日内与两通道相关；"
-              "逐日执行目标 = 官方计划的日末 SOC；仅作事后风险评价，不参与在线决策；"
-              "图 figures/Q2_总费用分布.pdf。"),
+              "逐日执行沿用统一策略 free（无段末硬目标）、SOC 跨日连续；"
+              "仅作事后风险评价，不参与在线决策；图 figures/Q2_总费用分布.pdf。"),
     )
     record(
         f"问题二 口径E（2日滚动时间留出选定：EWMA h={W:g} + κ={kappa:g} + m={margin:g}）官方 result2",

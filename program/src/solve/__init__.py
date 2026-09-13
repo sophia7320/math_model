@@ -10,10 +10,14 @@
     code/outputs/*.csv      中间结果与图表数据
     results/result1.xlsx    官方格式结果文件
 """
-from solve.q1 import run_q1
+from __future__ import annotations
 
 
 def main() -> None:
+    # 延迟导入：避免 `python -m solve.q1` 先经包初始化再执行子模块时
+    # 触发 runpy 的 "found in sys.modules" 警告。
+    from solve.q1 import run_q1
+
     run_q1()
 
 

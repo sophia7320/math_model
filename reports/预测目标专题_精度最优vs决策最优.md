@@ -5,7 +5,7 @@
 > 结论：在无调整机制的 Q2 口径下，**最优预测是净需求的 80% 分位数（有偏）**，光伏折扣
 > δ* ≈ 400 kW 可省 **8.7%（确定性）/ 9.85%（MC 期望）**；在带日内调整的 Q3 口径下，
 > 偏差收益被调整机制大幅吸收（5% 裕度仅 −0.15%）。
-> 代码：`program/src/solve/q2_bias.py`、`q2_bias_roll.py`；输出：`code/outputs/q2_bias_*.csv`
+> 代码：`program/src/solve/experiments/q2_bias.py`、`experiments/q2_bias_roll.py`；输出：`code/outputs/q2_bias_*.csv`
 
 ---
 
@@ -140,8 +140,8 @@ Q3（有 6:00/12:00/18:00 调整）的保守裕度扫描（因果口径复算）
 
 | 文件 | 说明 |
 | --- | --- |
-| `program/src/solve/q2_bias.py` | 三条路线确定性 + MC 对比（约 9 分钟） |
-| `program/src/solve/q2_bias_roll.py` | 滚动标定验证（约 1 分钟） |
+| `program/src/solve/experiments/q2_bias.py` | 三条路线确定性 + MC 对比（约 9 分钟） |
+| `program/src/solve/experiments/q2_bias_roll.py` | 滚动标定验证（约 1 分钟） |
 | `code/outputs/q2_bias_delta_scan.csv` | δ 扫描表 |
 | `code/outputs/q2_bias_mc.csv` | 四策略 MC 统计 |
 | `code/outputs/q2_bias_rolling.csv` | 滚动标定对比 |

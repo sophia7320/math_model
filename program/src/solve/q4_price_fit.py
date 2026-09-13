@@ -8,6 +8,9 @@
   · 滚动 W=7 标定（可部署，无前视）
 
 运行（program/ 下）：uv run python -m solve.q4_price_fit
+
+口径（2026-09-13 统一 v1.2）：计划输入 = κ·L̂ 与 max(P̂−m,0)（consistency.py），
+执行 = 逐槽因果 free（无段末硬目标）；末端自由。表随执行/风险口径变化时须重跑。
 """
 from __future__ import annotations
 
@@ -17,30 +20,19 @@ import numpy as np
 import pandas as pd
 
 import program as pm
+from solve import consistency as cs
 from solve import q2
-from solve import q3_proto as qp
 from solve.common import DATA_C, E0, ROOT, T
+from solve.data.attachments import load_extended
+from solve.models.adaptive import hist_forecast_asof, hist_load_forecast_asof
+from solve.models.price import (  # 唯一实现（models/price.py），此处再导出
+    forecast_price,
+    forecast_price_next_asof,
+)
+from solve.models.weights import simplex_grid  # 唯一实现（models/weights.py）
 
 DAY_START = q2.REPORT_START      # 31
 N_DAY = q2.N_DAY                 # 365
-
-
-def simplex_grid(step: float = 0.1):
-    n = int(round(1.0 / step))
-    return [(i / n, j / n, (n - i - j) / n)
-            for i in range(n + 1) for j in range(n + 1 - i)]
-
-
-def forecast_price(D, v, p4, p_typ):
-    """三源预测（kW 同量纲，元/kWh）；D 需要 ≥7。"""
-    return (v[0] * p4[D - 1] + v[1] * p4[D - 7] + v[2] * p_typ)
-
-
-def forecast_price_next_asof(D, v, p4, p_typ):
-    """在 D 日 0:00 预测 D+1 电价，不读取 P(D)。"""
-    if D < 7:
-        return p_typ
-    return v[0] * p4[D - 1] + v[1] * p4[D - 6] + v[2] * p_typ
 
 
 def mae_of(p4, p_typ, v, days):
@@ -48,38 +40,9 @@ def mae_of(p4, p_typ, v, days):
     return float(np.mean(errs))
 
 
-def run_year(p4, p_typ, data, v, days):
-    """全年计划/执行（跨日连续储能），返回 [DAY_START, 365) 的费用与紧急量。"""
-    load = data["load"]; pv_act = data["pv_act"]; fc0 = data["fc0"]
-    E = E0
-    tot_cost = 0.0
-    emerg_kwh = 0.0
-    for D in range(N_DAY):
-        p_hat = forecast_price(D, v, p4, p_typ) if D >= 7 else p4[D]
-        p_hat1 = forecast_price_next_asof(D, v, p4, p_typ)
-        load0 = qp.hist_load_forecast_asof(data, D, D) / 6.0
-        load1 = qp.hist_load_forecast_asof(data, D + 1, D) / 6.0
-        pv0 = q2._hour_to_slots(fc0[D]) / 6.0
-        pv1 = qp.hist_forecast_asof(data, D + 1, D) / 6.0
-        xh, Eh, _ = q2.plan_horizon(
-                np.concatenate([p_hat, p_hat1]), np.concatenate([load0, load1]),
-                np.concatenate([pv0, pv1]), E, None, eps=1e-3,
-            )
-        x, e_day_end = xh[:T], float(Eh[T - 1])
-        ex = q2.exec_day_causal(
-            p4[D], data["load"][D] / 6.0, pv_act[D] / 6.0, x, E,
-            e_end=e_day_end,
-        )
-        E = float(ex["E"][-1])
-        if D >= DAY_START:
-            tot_cost += float(p4[D] @ x + q2.EMERG_MULT * (p4[D] @ ex["e"]))
-            emerg_kwh += float(ex["e"].sum())
-    return tot_cost, emerg_kwh
-
-
 def main():
     pm.init(seed=42, root=str(ROOT))
-    data = qp.load_extended()
+    data = load_extended()
     p_typ = data["price"]  # 附件 1 = 逐槽均值
     df4 = pm.read_table(DATA_C / "附件4.xlsx")
     p4 = df4.iloc[:, 1:145].to_numpy(float)
@@ -111,18 +74,17 @@ def main():
         for j, v in enumerate(grid):
             p_hat = forecast_price(D, v, p4, p_typ) if D >= 7 else p4[D]
             p_hat1 = forecast_price_next_asof(D, v, p4, p_typ)
-            load0 = qp.hist_load_forecast_asof(data, D, D) / 6.0
-            load1 = qp.hist_load_forecast_asof(data, D + 1, D) / 6.0
-            pv0 = q2._hour_to_slots(data["fc0"][D]) / 6.0
-            pv1 = qp.hist_forecast_asof(data, D + 1, D) / 6.0
-            xh, Eh, _ = q2.plan_horizon(
-                    np.concatenate([p_hat, p_hat1]), np.concatenate([load0, load1]),
-                    np.concatenate([pv0, pv1]), E_state[j], None, eps=1e-3,
-                )
-            x, e_day_end = xh[:T], float(Eh[T - 1])
-            ex = q2.exec_day_causal(
-                p4[D], data["load"][D] / 6.0, data["pv_act"][D] / 6.0, x, E_state[j],
-                e_end=e_day_end,
+            load0 = cs.kappa_load(hist_load_forecast_asof(data, D, D)) / 6.0
+            load1 = cs.kappa_load(hist_load_forecast_asof(data, D + 1, D)) / 6.0
+            pv0 = cs.margin_pv(q2._hour_to_slots(data["fc0"][D])) / 6.0
+            pv1 = cs.margin_pv(hist_forecast_asof(data, D + 1, D)) / 6.0
+            xh, _Eh, _ = q2.plan_horizon(
+                np.concatenate([p_hat, p_hat1]), np.concatenate([load0, load1]),
+                np.concatenate([pv0, pv1]), E_state[j], None, eps=1e-3,
+            )
+            x = xh[:T]
+            ex = q2.exec_segment_causal(
+                data["load"][D] / 6.0, data["pv_act"][D] / 6.0, x, E_state[j], None,
             )
             E_state[j] = float(ex["E"][-1])
             daily_costs[D, j] = float(p4[D] @ x + q2.EMERG_MULT * (p4[D] @ ex["e"]))

@@ -1,0 +1,44 @@
+\section{复现说明与关键执行步骤}
+计算使用Python、NumPy、SciPy及HiGHS，结果表通过OpenPyXL回读。
+运行环境由uv管理；正式Q3无场景随机性，对冲扩展种子为7、蒙特卡洛种子为42。复现时先进入随附Python工程目录。
+命令及结果对应关系见表\ref{tab:repro}，求解中的微小正则项不计入正文购电费用。
+\begin{table}[htbp]\centering
+\caption{核心复现入口}\label{tab:repro}
+\small
+\begin{tabularx}{\textwidth}{p{.60\textwidth}X}
+\toprule
+命令 & 对应内容\\\midrule
+\texttt{uv run python -m solve.q1} & 典型日调度\\
+\texttt{uv run python -m solve.q2\_tune --result2} & 问题二正式结果\\
+\texttt{uv run python -m solve.q3} & 问题三正式结果\\
+\texttt{uv run python -m solve.q4\_price\_fit} & 历史电价成本标定\\
+\texttt{uv run python -m solve.q4 --result4-2} & 波动价格无调整层\\
+\texttt{uv run python -m solve.q4 --result4-3} & 波动价格调整层\\
+\texttt{uv run python -m solve.q3\_ablation} & 正式方案与对冲扩展消融\\
+\bottomrule
+\end{tabularx}
+\end{table}
+复现顺序应先形成历史成本表与权重，再执行问题二和问题三，最后重算电价标定与问题四。
+同一随机种子有助于比较方案，但线性规划的退化解、求解器版本和浮点阈值仍可能造成小规模数值差异。
+\begin{lstlisting}[language=Python,basicstyle=\ttfamily\footnotesize,breaklines=true]
+for day in evaluation_days:
+    weights = update_from_past_costs(day)
+    forecast = predict_two_days(day, weights)
+    plan = optimize_horizon(forecast, actual_soc)
+    for slot in current_day:
+        if forecast_is_released(slot):
+            commitment = adjust_remaining_plan(
+                released_forecast, actual_soc, plan)
+        load, pv = observe_current_slot(slot)
+        charge, discharge, emergency, spill = execute(
+            commitment[slot], load, pv, actual_soc)
+        actual_soc += eta * charge - discharge / eta
+    settle_day_and_export()
+\end{lstlisting}
+上述为算法逻辑说明，完整求解、时间映射和回读审计以随附源程序为准。
+论文指定日期表直接取自正式Excel，计划量与调整量分别保留；紧急购电表列出全部对应事件，无事件日明确记为零。
+
+\section{AI辅助说明}
+本次论文整理使用AI编码助手辅助核对已有结果、组织公式和段落、生成表格与LaTeX排版。
+数值依据为给定附件及随附求解程序输出，文献条目经公开来源核对。
+此说明记录本次辅助范围，不替代参赛者对题意、模型与最终提交材料的审阅。
