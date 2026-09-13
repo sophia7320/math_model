@@ -1,6 +1,6 @@
 \section{复现说明与关键执行步骤}
 计算使用Python、NumPy、SciPy及HiGHS，结果表通过OpenPyXL回读。
-运行环境由uv管理；正式Q3无场景随机性，对冲扩展种子为7、蒙特卡洛种子为42。复现时先进入随附Python工程目录。
+运行环境提供 uv 与 requirements.txt 两种安装方式（详见支撑材料 README.txt）；正式Q3无场景随机性，对冲扩展种子为7、蒙特卡洛种子为42。复现时先进入随附Python工程目录。
 命令及结果对应关系见表\ref{tab:repro}，求解中的微小正则项不计入正文购电费用。
 \begin{table}[htbp]\centering
 \caption{核心复现入口}\label{tab:repro}

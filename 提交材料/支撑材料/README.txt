@@ -9,13 +9,15 @@
   README.txt     本文件
 
 软件环境与依赖
-  Python 3.14；依赖由 uv 管理，版本锁定见 src/pyproject.toml 与 src/uv.lock。
-  主要依赖：numpy、scipy、pandas、matplotlib、openpyxl；仅深度学习原型使用 torch（未进入正式方案）。
+  Python 3.14；无深度学习框架依赖（权重精化为纯 NumPy 实现）。
+  方式一（uv，推荐）：版本锁定见 src/pyproject.toml 与 src/uv.lock；cd src && uv sync
+  （uv 可自动安装 Python 3.14）。
+  方式二（pip 备选）：cd src && pip install -r requirements.txt（需 Python 3.14+；
+  requirements.txt 由 uv export 原生生成，与 uv.lock 一致）。
 
 一键复现步骤（工作目录必须为 src/）
-  1) 安装 uv：https://docs.astral.sh/uv/
-  2) cd src && uv sync
-  3) 依次运行：
+  1) 安装依赖：uv sync（或 pip install -r requirements.txt）
+  2) 依次运行：
      uv run python -m solve.q1                    # 问题一：典型日调度
      uv run python -m solve.q2_tune --result2     # 问题二：官方 result2
      uv run python -m solve.q3                    # 问题三：正式无对冲方案
@@ -29,6 +31,6 @@
   全局初始化 seed=42；Q3 场景对冲 seed=7（灵敏度另用 17/27）；详见 src/src/solve/consistency.py 与各脚本。
 
 一致性声明
-  1) 本目录 src/ 与论文附录“源程序代码”一致；
+  1) 本目录 src/ 为完整可运行工程；论文附录仅收录核心算法片段；
   2) 运行结果与 results/ 中五份正式结果表一致；
-  3) 历史探索脚本与深度学习原型仅留存备考，不参与正式结果（正式链路见上述命令）。
+  3) 历史探索脚本（src/src/solve/experiments、legacy）仅留存备考，不参与正式结果。

@@ -762,8 +762,13 @@ def write_result2_tuned(W: float = 5.0, kappa: float = 1.02,
     return {"plan": plan, "emerg": emerg, "checks": checks, "out": out}
 
 
-def make_weight_figure(W: float = 5.0) -> None:
-    """重生成权重演化图（EWMA h=5 标定口径，与官方模型一致）。"""
+def make_weight_figure(W: float = 5.0, smooth: int = 15) -> None:
+    """重生成权重演化图（EWMA h=5 标定口径，与官方模型一致）。
+
+    模型权重取自离散网格（步长 0.2），逐日绘制锯齿明显；图中曲线为
+    **显示用**居中滑动平均（窗口 ``smooth`` 天），不改变模型口径；
+    原始逐日权重同时保存在作图数据 CSV 的原始列中。
+    """
     import matplotlib.pyplot as plt
 
     pm.init(root=str(ROOT))
@@ -772,11 +777,18 @@ def make_weight_figure(W: float = 5.0) -> None:
     dates = [model.dates[d] for d in REP]
     Wm = np.array([w for w, _ in seq])
     Um = np.array([u for _, u in seq])
+
+    def _roll(A):
+        return pd.DataFrame(A).rolling(smooth, center=True, min_periods=1).mean().to_numpy()
+
+    Ws, Us = _roll(Wm), _roll(Um)
     w_cols = ["w1_L(d-7)", "w2_L(d-14)", "w3_典型日"]
     u_cols = ["u1_P(d-1)", "u2_P(d-2)", "u3_典型日"]
     df = pd.DataFrame({"日期": dates,
                        **{c: Wm[:, i] for i, c in enumerate(w_cols)},
-                       **{c: Um[:, i] for i, c in enumerate(u_cols)}})
+                       **{c: Um[:, i] for i, c in enumerate(u_cols)},
+                       **{c + "_平滑": Ws[:, i] for i, c in enumerate(w_cols)},
+                       **{c + "_平滑": Us[:, i] for i, c in enumerate(u_cols)}})
     x = np.arange(len(dates))
     month_starts = [i for i, s in enumerate(dates) if s.endswith("-01")]
     fig, axes = plt.subplots(2, 1, figsize=(7, 5.6), sharex=True)
@@ -784,7 +796,8 @@ def make_weight_figure(W: float = 5.0) -> None:
         (axes[0], w_cols, "负荷权重", ["d-7", "d-14", "典型日"]),
         (axes[1], u_cols, "光伏权重", ["d-1", "d-2", "典型日"]),
     ):
-        ax.stackplot(x, [df[c].to_numpy() for c in cols], labels=labels, alpha=0.9)
+        sm = [df[c + "_平滑"].to_numpy() for c in cols]
+        ax.stackplot(x, sm, labels=labels, alpha=0.9)
         ax.set_ylabel(ylabel)
         ax.set_ylim(0, 1)
         ax.legend(loc="upper center", ncol=3, fontsize=8, framealpha=0.9)

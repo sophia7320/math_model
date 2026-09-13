@@ -8,7 +8,7 @@ w、u 为凸权重（softmax 参数化），每天一组、144 个时段共用�
 标定（目标：窗口内实际总费用 = 计划费 + 紧急购电费）：
     1) 每个日历日 k 在权重网格（步长 grid_step）上算成本表 C[k, i, j]；
     2) 目标日 d 的权重 = 窗口 [d-W, d-1] 平均成本最小的格子（查表）；
-    3) W=1 主结果再用 torch.optim.Adam + 中心差分数值梯度在该窗口上精化，
+    3) W=1 主结果再用 Adam（纯 NumPy 实现）+ 中心差分数值梯度在该窗口上精化，
        保留更优者。成本表并行预计算并缓存。
 
 执行沿用问题二口径（见 solve/q2.py）：计划购电 take-or-pay、储能日循环 E=6000、
@@ -32,7 +32,6 @@ import time
 
 import numpy as np
 import pandas as pd
-import torch
 
 import program as pm
 from solve.common import (
@@ -286,36 +285,43 @@ class AdaptiveWeightModel:
         return list(range(max(self.START, d - W), d))
 
     # ------------------------------------------------------------------
-    # 梯度精化（softmax + 数值梯度 + torch.optim.Adam）
+    # 梯度精化（softmax + 数值梯度 + NumPy 手写 Adam）
     # ------------------------------------------------------------------
     # ── 数值梯度精化（softmax + 中心差分 + Adam） ───────────────────
     #     窗口目标  J̄(θ) = (1/|D|)·Σ_{d∈D} J_d(softmax(θ[:3]), softmax(θ[3:]))
     #     中心差分  ∂J̄/∂θ_i ≈ [J̄(θ+δe_i) − J̄(θ−δe_i)] / (2δ)，e_i 为第 i 个单位方向
-    #     用 torch.optim.Adam 迭代 steps 步（只保留优于网格解时才采用）。
+    #     用 Adam 迭代 steps 步（β1=0.9、β2=0.999、ε=1e-8，与 torch 默认一致）。
     def window_cost(self, theta, days) -> float:
         """窗口平均实际总费用（标定目标；θ 为 6 维：负荷 3 + 光伏 3）。"""
         w, u = softmax(theta[:3]), softmax(theta[3:])
         return float(np.mean([self.day_cost(d, w, u) for d in days]))
 
     def calibrate(self, d: int, theta, W: int | None = None) -> np.ndarray:
-        """在窗口 [d-W, d-1] 上做 steps 步 Adam（中心差分梯度），返回 6 维 θ。"""
+        """在窗口 [d-W, d-1] 上做 steps 步 Adam（中心差分梯度），返回 6 维 θ。
+
+        Adam 为纯 NumPy 实现，超参数与 ``torch.optim.Adam`` 默认一致
+        （β1=0.9、β2=0.999、ε=1e-8），避免引入深度学习框架依赖。
+        """
         days = self.window_days(d, W)
-        th = torch.tensor(theta, dtype=torch.float64)
-        opt = torch.optim.Adam([th], lr=self.lr)
-        for _ in range(self.steps):
-            base = th.detach().numpy()
+        th = np.asarray(theta, dtype=float).copy()
+        m = np.zeros(6)   # 一阶矩（梯度）
+        v = np.zeros(6)   # 二阶矩（梯度平方）
+        b1, b2, eps = 0.9, 0.999, 1e-8
+        for t in range(1, self.steps + 1):
             grad = np.empty(6)
             for i in range(6):
-                plus, minus = base.copy(), base.copy()
+                plus, minus = th.copy(), th.copy()
                 plus[i] += self.eps_grad
                 minus[i] -= self.eps_grad
                 grad[i] = (
                     self.window_cost(plus, days) - self.window_cost(minus, days)
                 ) / (2 * self.eps_grad)
-            th.grad = torch.from_numpy(grad)
-            opt.step()
-            opt.zero_grad()
-        return th.detach().numpy()
+            m = b1 * m + (1.0 - b1) * grad
+            v = b2 * v + (1.0 - b2) * grad * grad
+            m_hat = m / (1.0 - b1 ** t)
+            v_hat = v / (1.0 - b2 ** t)
+            th -= self.lr * m_hat / (np.sqrt(v_hat) + eps)
+        return th
 
     # ------------------------------------------------------------------
     # 成本表（并行预计算 + 缓存）

@@ -24,3 +24,8 @@
 | `models.py` | TCNNet / PVTransformer |
 | `train.py` | 训练、测试集评估、与官方/历史对比、组合权重（无前视）、出图 |
 | `outputs/` | 训练曲线、误差剖面、样例预测、指标 JSON |
+
+---
+> 注（2026-09-13）：torch 已从项目依赖移除（官方链路权重精化改为纯 NumPy Adam）；
+> 重跑本实验需先 `uv add torch`，GPU 轮子见 PyTorch 官方索引。
+

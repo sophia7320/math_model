@@ -33,7 +33,7 @@
   - `code/outputs/`：`cache/q2e/*.npz`（**只放官方表，`tag=q2e`**）、`cache/q2e_regsrc/*.npz`（回归源变体表，`RegSourceModel.CACHE_TAG`）——**`data/attachments.py::load_extended` 按 tag 选表（门面 `q3_proto.load_extended`），变体表不要写进 `cache/q2e`**；`cache/q2arima/*.npz` 删除后需重算约 13 分钟；`q4_price_fit_daily.npz` 为 Q4 电价逐日费用/误差表（动态修正复用它）。
   - 输出根由 `solve/common.py::workspace_root()` 解析（`MATHMODEL_ROOT` > `program/` 上一级 > cwd），不要另建输出目录。
 - 附件在 `program/data/C/`；`solve/legacy/data_reader.py` 用相对路径 `./data/C/...`——**运行这类脚本时 cwd 必须是 `program/`**。
-- torch/torchvision 走 pyproject 的 CUDA 13.0 轮子源（`[[tool.uv.index]] pytorch-cu130`），不要改用默认 PyPI 源。**本机 GPU 可用**（RTX 5060 / sm_120 / torch 2.14.0+cu130）；深度学习试验在 `program/experiments/q3_dl/`（结论：单年数据下 DL 季节性风险大、作为组合第三源仅小幅增量，已搁置——未明确要求勿重跑）。
+- torch 已从项目依赖移除（官方链路权重精化改为**纯 NumPy Adam**，零框架依赖）；`program/experiments/q3_dl/` 深度学习试验已搁置（单年数据季节性风险大），如需重跑自行 `uv add torch`（GPU 轮子走 PyTorch 官方索引）。
 - **一次性探索脚本**（依赖未进 pyproject 时）用 `--no-project` 临时注入，依赖速记：数值计算 numpy,scipy,matplotlib,pandas / 符号计算 sympy / 深度学习 torch / 读表 openpyxl。
 - 不要用裸 `python` / `pip install`，也不要手动建/激活 venv（`.venv` 由 uv 维护）。
 - 脚本含中文输出时先设 `$env:PYTHONIOENCODING='utf-8'`；控制台是 PowerShell 5.1 且默认 GBK，列/搜中文文件名先设 `[Console]::OutputEncoding=[Text.Encoding]::UTF8`，读文件内容优先用 Read/Glob/Grep 工具而非 Get-Content。
